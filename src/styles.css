@@ -1,0 +1,103 @@
+/* RESET BASICO */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* BASE */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: #f7f8f5;
+  color: #1f2937;
+}
+
+/* CONTENEDOR PRINCIPAL */
+.container {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+/* TITULO */
+.title {
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+/* TARJETAS */
+.card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e5e7eb;
+}
+
+/* SALDO */
+.balance {
+  background: #e8f3ec;
+  border: 1px solid #d9e2dc;
+}
+
+.balance h2 {
+  font-size: 14px;
+  color: #4f8a6b;
+  margin-bottom: 6px;
+}
+
+.balance p {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* FORM */
+.form input,
+.form select {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+}
+
+/* BOTONES */
+.button {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background-color: #4f8a6b;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button-secondary {
+  background-color: #e5e7eb;
+  color: #1f2937;
+}
+
+/* LISTA */
+.transaction {
+  border-bottom: 1px solid #eee;
+  padding: 10px 0;
+}
+
+.transaction:last-child {
+  border-bottom: none;
+}
+
+.transaction-top {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 500;
+}
+
+.transaction-bottom {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 4px;
+}
