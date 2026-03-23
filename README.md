@@ -6,6 +6,7 @@ Aplicacion web para registrar gastos compartidos entre personas, organizar movim
 
 - Produccion: https://app-gastos-pareja.web.app
 - Repositorio: https://github.com/IvanCasana/app-gastos-pareja
+- Historial de cambios: [CHANGELOG.md](./CHANGELOG.md)
 
 ## Objetivo del proyecto
 
