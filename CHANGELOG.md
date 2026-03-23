@@ -6,6 +6,15 @@ Este historial sigue una estructura inspirada en [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+### Added
+- Hoja de perfil dentro de la app para editar username y gestionar avatar.
+- Soporte PWA inicial con `manifest` y `service worker` para instalacion en celular.
+- Sistema de avatares predefinidos con tematica de animales, priorizando gatitos.
+
+### Changed
+- El perfil ahora permite alternar entre foto de Google y presets visuales guardados en Firestore.
+- La UI de cabecera incorpora acceso directo a perfil.
+
 ### Pendiente
 - Ajustes finales de UX/UI sobre el rediseño actual.
 - Nuevas mejoras de producto que entren en el siguiente release.

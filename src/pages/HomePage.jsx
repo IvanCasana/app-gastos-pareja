@@ -16,9 +16,10 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-
 import TransactionForm from "../components/TransactionForm";
 import TransactionList from "../components/TransactionList";
+import ProfileSheet from "../components/ProfileSheet";
+import UserAvatar from "../components/UserAvatar";
 import Login from "../components/login";
 import CompleteProfile from "../components/CompleteProfile";
 import { calculateBalance, getBalanceMessage } from "../utils/balance";
@@ -45,10 +46,6 @@ function createInviteCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-function getAvatarLetter(username) {
-  return (username || "U").trim().charAt(0).toUpperCase();
-}
-
 function HomePage({
   user: externalUser,
   profile: externalProfile,
@@ -73,8 +70,12 @@ function HomePage({
   const [groupActionLoading, setGroupActionLoading] = useState(false);
   const [groupsExpanded, setGroupsExpanded] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [profileSheetOpen, setProfileSheetOpen] = useState(false);
   const [visibleTransactionsCount, setVisibleTransactionsCount] = useState(PAGE_SIZE);
   const [memberProfiles, setMemberProfiles] = useState({});
+  const [profileSaveError, setProfileSaveError] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [installPromptEvent, setInstallPromptEvent] = useState(null);
 
   const user = externalUser ?? internalUser;
   const profile = externalProfile ?? internalProfile;
@@ -123,6 +124,25 @@ function HomePage({
 
     loadProfile();
   }, [hasExternalSession, internalUser]);
+
+  useEffect(() => {
+    function handleBeforeInstallPrompt(event) {
+      event.preventDefault();
+      setInstallPromptEvent(event);
+    }
+
+    function handleAppInstalled() {
+      setInstallPromptEvent(null);
+    }
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
 
   const transactionsCollection = useMemo(() => collection(db, "transactions"), []);
   const groupsCollection = useMemo(() => collection(db, "groups"), []);
@@ -177,10 +197,15 @@ function HomePage({
         currentGroup.memberNames?.[memberId] ||
         (memberId === user?.uid ? profile?.username : "Integrante"),
       photoURL:
-        memberProfiles[memberId]?.photoURL ||
-        (memberId === user?.uid ? profile?.photoURL : ""),
+        memberId === user?.uid
+          ? profile?.photoURL || ""
+          : memberProfiles[memberId]?.photoURL || "",
+      avatarPreset:
+        memberId === user?.uid
+          ? profile?.avatarPreset || ""
+          : memberProfiles[memberId]?.avatarPreset || "",
     }));
-  }, [currentGroup, memberProfiles, profile?.photoURL, profile?.username, user?.uid]);
+  }, [currentGroup, memberProfiles, profile?.avatarPreset, profile?.photoURL, profile?.username, user?.uid]);
 
   const memberNames = useMemo(() => {
     return currentMembers.reduce((accumulator, member) => {
@@ -192,6 +217,13 @@ function HomePage({
   const memberPhotos = useMemo(() => {
     return currentMembers.reduce((accumulator, member) => {
       accumulator[member.uid] = member.photoURL || "";
+      return accumulator;
+    }, {});
+  }, [currentMembers]);
+
+  const memberAvatarPresets = useMemo(() => {
+    return currentMembers.reduce((accumulator, member) => {
+      accumulator[member.uid] = member.avatarPreset || "";
       return accumulator;
     }, {});
   }, [currentMembers]);
@@ -254,11 +286,17 @@ function HomePage({
             const userDoc = await getDoc(doc(db, "users", memberId));
 
             if (!userDoc.exists()) {
-              return [memberId, { photoURL: "" }];
+              return [memberId, { photoURL: "", avatarPreset: "" }];
             }
 
             const memberData = userDoc.data();
-            return [memberId, { photoURL: memberData.photoURL || "" }];
+            return [
+              memberId,
+              {
+                photoURL: memberData.photoURL || "",
+                avatarPreset: memberData.avatarPreset || "",
+              },
+            ];
           })
         );
 
@@ -641,6 +679,105 @@ function HomePage({
     setVisibleTransactionsCount((currentValue) => currentValue + PAGE_SIZE);
   }
 
+  async function handleSaveProfile({ username, avatarPreset }) {
+    if (!user || !profile) {
+      return false;
+    }
+
+    setProfileSaveError("");
+
+    const cleanUsername = username.trim();
+    const usernameLower = cleanUsername.toLowerCase();
+
+    if (cleanUsername.length < 3) {
+      setProfileSaveError("El nombre de usuario debe tener al menos 3 caracteres.");
+      return false;
+    }
+
+    const currentUsernameLower = (profile.usernameLower || "").toLowerCase();
+    const nextAvatarPreset = avatarPreset || "";
+
+    if (
+      usernameLower === currentUsernameLower &&
+      nextAvatarPreset === (profile.avatarPreset || "")
+    ) {
+      setProfileSheetOpen(false);
+      return true;
+    }
+
+    setProfileSaving(true);
+
+    try {
+      const nextUsernameRef = doc(db, "usernames", usernameLower);
+      const nextUsernameSnap = await getDoc(nextUsernameRef);
+
+      if (nextUsernameSnap.exists() && nextUsernameSnap.data().uid !== user.uid) {
+        setProfileSaveError("Ese nombre de usuario ya esta en uso.");
+        return false;
+      }
+
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, "users", user.uid), {
+        username: cleanUsername,
+        usernameLower,
+        avatarPreset: nextAvatarPreset,
+        updatedAt: serverTimestamp(),
+      });
+
+      batch.set(
+        nextUsernameRef,
+        {
+          uid: user.uid,
+          createdAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (currentUsernameLower && currentUsernameLower !== usernameLower) {
+        batch.delete(doc(db, "usernames", currentUsernameLower));
+      }
+
+      // El username visible debe mantenerse sincronizado dentro de cada grupo
+      // donde el usuario ya figura como miembro.
+      for (const groupId of profile.groupIds || []) {
+        batch.update(doc(db, "groups", groupId), {
+          [`memberNames.${user.uid}`]: cleanUsername,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+
+      const nextProfile = buildNextProfile(profile, {
+        username: cleanUsername,
+        usernameLower,
+        avatarPreset: nextAvatarPreset,
+      });
+
+      (onProfileCreated || setInternalProfile)(nextProfile);
+      setProfileSheetOpen(false);
+      return true;
+    } catch (error) {
+      console.error("Error al guardar perfil:", error);
+      setProfileSaveError("No se pudo actualizar el perfil.");
+      return false;
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function handleInstallApp() {
+    if (!installPromptEvent) {
+      return;
+    }
+
+    await installPromptEvent.prompt();
+    await installPromptEvent.userChoice;
+    setInstallPromptEvent(null);
+    setProfileSheetOpen(false);
+  }
+
   if (user === undefined || profile === undefined) {
     return (
       <main className="container">
@@ -674,15 +811,27 @@ function HomePage({
             {currentGroup ? ` · Grupo actual: ${currentGroup.name}` : ""}
           </p>
         </div>
-        {onLogout ? (
+        <div className="header-actions">
           <button
             type="button"
             className="button button-ghost"
-            onClick={onLogout}
+            onClick={() => {
+              setProfileSaveError("");
+              setProfileSheetOpen(true);
+            }}
           >
-            Cerrar sesion
+            Perfil
           </button>
-        ) : null}
+          {onLogout ? (
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={onLogout}
+            >
+              Cerrar sesion
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <section className="hero-panel">
@@ -700,18 +849,13 @@ function HomePage({
             <div className="member-pill-row">
               {currentMembers.map((member) => (
                 <div key={member.uid} className="member-pill" title={member.username}>
-                  {member.photoURL ? (
-                    <img
-                      src={member.photoURL}
-                      alt={`Avatar de ${member.username}`}
-                      className="member-pill-avatar"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <div className="member-pill-avatar member-pill-avatar-fallback">
-                      {getAvatarLetter(member.username)}
-                    </div>
-                  )}
+                  <UserAvatar
+                    photoURL={member.avatarPreset ? "" : member.photoURL}
+                    avatarPreset={member.avatarPreset}
+                    alt={`Avatar de ${member.username}`}
+                    className="member-pill-avatar"
+                    fallbackClassName="member-pill-avatar-fallback"
+                  />
                 </div>
               ))}
             </div>
@@ -878,6 +1022,7 @@ function HomePage({
             transactions={visibleTransactions}
             memberNames={memberNames}
             memberPhotos={memberPhotos}
+            memberAvatarPresets={memberAvatarPresets}
             currentUserId={user.uid}
             onEditTransaction={handleEditTransaction}
             onDeleteTransaction={handleDeleteTransaction}
@@ -927,6 +1072,19 @@ function HomePage({
           </aside>
         </>
       ) : null}
+
+      <ProfileSheet
+        key={`${profile.uid}-${profile.username}-${profileSheetOpen ? "open" : "closed"}`}
+        user={user}
+        profile={profile}
+        isOpen={profileSheetOpen}
+        isSaving={profileSaving}
+        error={profileSaveError}
+        onClose={() => setProfileSheetOpen(false)}
+        onSave={handleSaveProfile}
+        onInstallApp={handleInstallApp}
+        canInstallApp={Boolean(installPromptEvent)}
+      />
     </main>
   );
 }

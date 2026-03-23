@@ -92,6 +92,12 @@ select {
   min-width: 0;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .header-meta {
   margin-top: 2px;
   color: var(--muted);
@@ -158,10 +164,17 @@ select {
   justify-content: center;
   width: 42px;
   height: 42px;
-  background: rgba(255, 255, 255, 0.24);
-  color: white;
-  font-size: 16px;
-  font-weight: 800;
+}
+
+.avatar-preset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatar-face {
+  width: 100%;
+  height: 100%;
 }
 
 .hero-panel-button {
@@ -355,6 +368,7 @@ select {
 
 .transaction-main {
   min-width: 0;
+  flex: 1;
 }
 
 .transaction-person {
@@ -378,10 +392,6 @@ select {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: var(--brand-soft);
-  color: var(--brand-dark);
-  font-size: 14px;
-  font-weight: 800;
 }
 
 .transaction-amount {
@@ -417,9 +427,10 @@ select {
 
 .transaction-actions {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-top: 12px;
-  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .transaction-side {
@@ -427,6 +438,8 @@ select {
   flex-direction: column;
   align-items: flex-end;
   gap: 12px;
+  margin-left: auto;
+  min-width: max-content;
 }
 
 .timeline-load-more {
@@ -518,6 +531,95 @@ select {
 
 .composer-sheet-header {
   margin-bottom: 16px;
+}
+
+.profile-sheet-header h2 {
+  font-size: 32px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  margin-bottom: 12px;
+}
+
+.profile-sheet-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+
+.profile-sheet-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid rgba(15, 143, 111, 0.14);
+}
+
+.profile-sheet-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+}
+
+.profile-sheet-photo-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.profile-sheet-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.profile-sheet-preset {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-sheet-preset.is-selected {
+  border-color: rgba(15, 143, 111, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(15, 143, 111, 0.18);
+}
+
+.profile-sheet-preset-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+}
+
+.profile-sheet-preset .profile-sheet-avatar-fallback {
+  width: 52px;
+  height: 52px;
+}
+
+.profile-sheet-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.profile-sheet-meta strong {
+  font-size: 18px;
+}
+
+.profile-sheet-meta span {
+  color: var(--muted);
+  font-size: 14px;
+  word-break: break-word;
 }
 
 .balance {
@@ -674,6 +776,7 @@ select {
   }
 
   .transaction-actions {
+    flex-direction: row;
     margin-top: 0;
     justify-content: flex-end;
   }

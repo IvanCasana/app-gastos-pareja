@@ -1,0 +1,24 @@
+{
+  "name": "Gastos Compartidos",
+  "short_name": "Gastos",
+  "description": "App para registrar gastos compartidos y calcular balances entre integrantes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#efeae2",
+  "theme_color": "#0f8f6f",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

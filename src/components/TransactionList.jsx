@@ -1,7 +1,10 @@
+import UserAvatar from "./UserAvatar";
+
 function TransactionList({
   transactions,
   memberNames,
   memberPhotos,
+  memberAvatarPresets,
   currentUserId,
   onEditTransaction,
   onDeleteTransaction,
@@ -9,10 +12,6 @@ function TransactionList({
   hasMore,
   onLoadMore,
 }) {
-  function getAvatarLetter(name) {
-    return (name || "U").trim().charAt(0).toUpperCase();
-  }
-
   function getTypeLabel(type) {
     if (type === "SHARED") return "Compartido";
     if (type === "SETTLEMENT") return "Dar dinero";
@@ -53,6 +52,8 @@ function TransactionList({
           transaction.paidBy ||
           "Integrante";
         const paidByPhoto = memberPhotos?.[transaction.paidByUserId] || "";
+        const paidByAvatarPreset =
+          memberAvatarPresets?.[transaction.paidByUserId] || "";
         const createdByName =
           memberNames[transaction.createdByUserId] || "Integrante";
         const canEdit =
@@ -69,18 +70,13 @@ function TransactionList({
             <div className="transaction-top">
               <div className="transaction-main">
                 <div className="transaction-person">
-                  {paidByPhoto ? (
-                    <img
-                      src={paidByPhoto}
-                      alt={`Avatar de ${paidByName}`}
-                      className="transaction-avatar"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <div className="transaction-avatar transaction-avatar-fallback">
-                      {getAvatarLetter(paidByName)}
-                    </div>
-                  )}
+                  <UserAvatar
+                    photoURL={paidByAvatarPreset ? "" : paidByPhoto}
+                    avatarPreset={paidByAvatarPreset}
+                    alt={`Avatar de ${paidByName}`}
+                    className="transaction-avatar"
+                    fallbackClassName="transaction-avatar-fallback"
+                  />
                   <p className="transaction-amount">
                     $ {Number(transaction.amount).toFixed(2)}
                   </p>

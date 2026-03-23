@@ -51,6 +51,7 @@ export default function CompleteProfile({ user, profile, onProfileCreated }) {
         uid: user.uid,
         email: user.email || "",
         photoURL: user.photoURL || "",
+        avatarPreset: profile?.avatarPreset || "",
         username: cleanUsername,
         usernameLower,
         activeGroupId: profile?.activeGroupId || profile?.groupId || null,
