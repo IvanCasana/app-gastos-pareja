@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import categories from "../data/categories";
 
 function getDefaultPaidBy(members, currentUserId) {
@@ -9,6 +9,29 @@ function getDefaultPaidBy(members, currentUserId) {
   return members[0]?.uid || "";
 }
 
+function buildInitialFormState(initialValues, members, currentUserId) {
+  const defaultPaidBy = getDefaultPaidBy(members, currentUserId);
+
+  if (initialValues) {
+    return {
+      amount:
+        initialValues.amount === undefined ? "" : String(initialValues.amount),
+      description: initialValues.description || "",
+      category: initialValues.category || "Supermercado",
+      type: initialValues.type || "SHARED",
+      paidByUserId: initialValues.paidByUserId || defaultPaidBy,
+    };
+  }
+
+  return {
+    amount: "",
+    description: "",
+    category: "Supermercado",
+    type: "SHARED",
+    paidByUserId: defaultPaidBy,
+  };
+}
+
 function TransactionForm({
   members,
   currentUserId,
@@ -17,35 +40,10 @@ function TransactionForm({
   isSaving,
   onCancelEdit,
 }) {
-  const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("Supermercado");
-  const [type, setType] = useState("SHARED");
-  const [paidByUserId, setPaidByUserId] = useState(
-    getDefaultPaidBy(members, currentUserId)
+  const [formState, setFormState] = useState(() =>
+    buildInitialFormState(initialValues, members, currentUserId)
   );
-
-  useEffect(() => {
-    if (initialValues) {
-      setAmount(
-        initialValues.amount === undefined ? "" : String(initialValues.amount)
-      );
-      setDescription(initialValues.description || "");
-      setCategory(initialValues.category || "Supermercado");
-      setType(initialValues.type || "SHARED");
-      setPaidByUserId(
-        initialValues.paidByUserId ||
-          getDefaultPaidBy(members, currentUserId)
-      );
-      return;
-    }
-
-    setAmount("");
-    setDescription("");
-    setCategory("Supermercado");
-    setType("SHARED");
-    setPaidByUserId(getDefaultPaidBy(members, currentUserId));
-  }, [initialValues, members, currentUserId]);
+  const { amount, description, category, type, paidByUserId } = formState;
 
   const numericAmount = Number(amount);
 
@@ -79,11 +77,7 @@ function TransactionForm({
       return;
     }
 
-    setAmount("");
-    setDescription("");
-    setCategory("Supermercado");
-    setType("SHARED");
-    setPaidByUserId(getDefaultPaidBy(members, currentUserId));
+    setFormState(buildInitialFormState(null, members, currentUserId));
   }
 
   return (
@@ -98,7 +92,12 @@ function TransactionForm({
           min="0"
           placeholder="Monto"
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          onChange={(event) =>
+            setFormState((currentState) => ({
+              ...currentState,
+              amount: event.target.value,
+            }))
+          }
           autoFocus
         />
 
@@ -118,10 +117,23 @@ function TransactionForm({
         <input
           placeholder="Descripcion"
           value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          onChange={(event) =>
+            setFormState((currentState) => ({
+              ...currentState,
+              description: event.target.value,
+            }))
+          }
         />
 
-        <select value={category} onChange={(e) => setCategory(e.target.value)}>
+        <select
+          value={category}
+          onChange={(event) =>
+            setFormState((currentState) => ({
+              ...currentState,
+              category: event.target.value,
+            }))
+          }
+        >
           {categories.map((categoryOption) => (
             <option key={categoryOption} value={categoryOption}>
               {categoryOption}
@@ -129,14 +141,27 @@ function TransactionForm({
           ))}
         </select>
 
-        <select value={type} onChange={(e) => setType(e.target.value)}>
+        <select
+          value={type}
+          onChange={(event) =>
+            setFormState((currentState) => ({
+              ...currentState,
+              type: event.target.value,
+            }))
+          }
+        >
           <option value="SHARED">Compartido</option>
           <option value="SETTLEMENT">Dar dinero</option>
         </select>
 
         <select
           value={paidByUserId}
-          onChange={(e) => setPaidByUserId(e.target.value)}
+          onChange={(event) =>
+            setFormState((currentState) => ({
+              ...currentState,
+              paidByUserId: event.target.value,
+            }))
+          }
         >
           {members.map((member) => (
             <option key={member.uid} value={member.uid}>

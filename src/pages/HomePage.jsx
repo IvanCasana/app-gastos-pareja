@@ -746,6 +746,7 @@ function HomePage({
         <>
           <div className="card" style={{ opacity: isSaving ? 0.7 : 1 }}>
             <TransactionForm
+              key={`${currentGroup.id}-${editingTransaction?.id || "new"}-${user.uid}`}
               members={currentMembers}
               currentUserId={user.uid}
               onSaveTransaction={handleSaveTransaction}
