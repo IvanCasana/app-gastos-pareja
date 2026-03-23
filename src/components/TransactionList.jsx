@@ -1,6 +1,7 @@
 function TransactionList({
   transactions,
   memberNames,
+  currentUserId,
   onEditTransaction,
   onDeleteTransaction,
   deletingId,
@@ -29,6 +30,16 @@ function TransactionList({
           memberNames[transaction.paidByUserId] ||
           transaction.paidBy ||
           "Integrante";
+        const createdByName =
+          memberNames[transaction.createdByUserId] || "Integrante";
+        const canEdit =
+          Boolean(currentUserId) &&
+          Boolean(transaction.createdByUserId) &&
+          transaction.createdByUserId === currentUserId;
+        const canDelete =
+          Boolean(currentUserId) &&
+          Boolean(transaction.createdByUserId) &&
+          transaction.createdByUserId === currentUserId;
 
         return (
           <div key={transaction.id} className="transaction">
@@ -39,6 +50,10 @@ function TransactionList({
 
             <div className="transaction-bottom">
               {paidByName} - {getTypeLabel(transaction.type)}
+            </div>
+
+            <div className="transaction-bottom">
+              Cargado por: {createdByName}
             </div>
 
             {transaction.description ? (
@@ -52,28 +67,32 @@ function TransactionList({
                 marginTop: "8px",
               }}
             >
-              <button
-                type="button"
-                className="button button-secondary"
-                style={{ width: "auto", padding: "8px 12px" }}
-                onClick={() => onEditTransaction(transaction)}
-              >
-                Editar
-              </button>
-              <button
-                type="button"
-                className="button"
-                style={{
-                  width: "auto",
-                  padding: "8px 12px",
-                  backgroundColor:
-                    deletingId === transaction.id ? "#9ca3af" : "#b42318",
-                }}
-                disabled={deletingId === transaction.id}
-                onClick={() => onDeleteTransaction(transaction)}
-              >
-                {deletingId === transaction.id ? "Borrando..." : "Borrar"}
-              </button>
+              {canEdit ? (
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  style={{ width: "auto", padding: "8px 12px" }}
+                  onClick={() => onEditTransaction(transaction)}
+                >
+                  Editar
+                </button>
+              ) : null}
+              {canDelete ? (
+                <button
+                  type="button"
+                  className="button"
+                  style={{
+                    width: "auto",
+                    padding: "8px 12px",
+                    backgroundColor:
+                      deletingId === transaction.id ? "#9ca3af" : "#b42318",
+                  }}
+                  disabled={deletingId === transaction.id}
+                  onClick={() => onDeleteTransaction(transaction)}
+                >
+                  {deletingId === transaction.id ? "Borrando..." : "Borrar"}
+                </button>
+              ) : null}
             </div>
           </div>
         );

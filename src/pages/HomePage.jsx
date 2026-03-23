@@ -13,6 +13,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -60,6 +61,7 @@ function HomePage({
   const [isSaving, setIsSaving] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [deletingTransactionId, setDeletingTransactionId] = useState("");
+  const [deletingGroupId, setDeletingGroupId] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [groupActionLoading, setGroupActionLoading] = useState(false);
@@ -306,7 +308,10 @@ function HomePage({
         ? groupData.memberIds
         : [];
 
-      if (!memberIds.includes(user.uid) && memberIds.length >= (groupData.maxMembers || 2)) {
+      if (
+        !memberIds.includes(user.uid) &&
+        memberIds.length >= (groupData.maxMembers || 2)
+      ) {
         setGroupError("Ese grupo ya esta completo.");
         return;
       }
@@ -318,7 +323,9 @@ function HomePage({
         ...(groupData.memberNames || {}),
         [user.uid]: profile.username,
       };
-      const nextGroupIds = [...new Set([...(profile.groupIds || []), groupDoc.id])];
+      const nextGroupIds = [
+        ...new Set([...(profile.groupIds || []), groupDoc.id]),
+      ];
 
       await setDoc(
         doc(db, "groups", groupDoc.id),
@@ -373,6 +380,11 @@ function HomePage({
 
     try {
       if (editingTransaction) {
+        if (editingTransaction.createdByUserId !== user.uid) {
+          setSaveError("Solo puedes editar movimientos creados por ti.");
+          return false;
+        }
+
         await updateDoc(doc(db, "transactions", editingTransaction.id), {
           ...transactionData,
           groupId: currentGroup.id,
@@ -392,9 +404,13 @@ function HomePage({
       return true;
     } catch (error) {
       console.error("Error al guardar movimiento:", error);
-      setSaveError(
-        "Firestore rechazo el guardado. Revisa las reglas y publica firestore.rules."
-      );
+      if (error?.code === "permission-denied") {
+        setSaveError("Solo el creador del movimiento puede editarlo.");
+      } else {
+        setSaveError(
+          "Firestore rechazo el guardado. Revisa las reglas y publica firestore.rules."
+        );
+      }
       return false;
     } finally {
       setIsSaving(false);
@@ -403,11 +419,22 @@ function HomePage({
 
   function handleEditTransaction(transaction) {
     setSaveError("");
+
+    if (transaction.createdByUserId !== user.uid) {
+      setSaveError("Solo puedes editar movimientos creados por ti.");
+      return;
+    }
+
     setEditingTransaction(transaction);
   }
 
   async function handleDeleteTransaction(transaction) {
     setSaveError("");
+
+    if (transaction.createdByUserId !== user.uid) {
+      setSaveError("Solo puedes borrar movimientos creados por ti.");
+      return;
+    }
 
     const confirmed = window.confirm(
       "¿Seguro que quieres borrar este movimiento?"
@@ -427,9 +454,103 @@ function HomePage({
       }
     } catch (error) {
       console.error("Error al borrar movimiento:", error);
-      setSaveError("No se pudo borrar el movimiento.");
+      if (error?.code === "permission-denied") {
+        setSaveError("Solo el creador del movimiento puede borrarlo.");
+      } else {
+        setSaveError("No se pudo borrar el movimiento.");
+      }
     } finally {
       setDeletingTransactionId("");
+    }
+  }
+
+  async function handleDeleteGroup() {
+    if (!currentGroup) {
+      return;
+    }
+
+    if (currentGroup.createdBy !== user.uid) {
+      setGroupError("Solo el creador del grupo puede borrarlo.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "¿Seguro que quieres borrar este grupo? Se eliminaran tambien sus movimientos para todos."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setGroupError("");
+    setDeletingGroupId(currentGroup.id);
+
+    try {
+      const batch = writeBatch(db);
+      const groupIdToDelete = currentGroup.id;
+
+      batch.delete(doc(db, "groups", groupIdToDelete));
+
+      const transactionSnapshot = await getDocs(
+        query(transactionsCollection, where("groupId", "==", groupIdToDelete))
+      );
+
+      transactionSnapshot.docs.forEach((transactionDoc) => {
+        batch.delete(doc(db, "transactions", transactionDoc.id));
+      });
+
+      const memberIds = Array.isArray(currentGroup.memberIds)
+        ? currentGroup.memberIds
+        : [];
+
+      const userSnapshots = await Promise.all(
+        memberIds.map((memberId) => getDoc(doc(db, "users", memberId)))
+      );
+
+      userSnapshots.forEach((userSnapshot) => {
+        if (!userSnapshot.exists()) {
+          return;
+        }
+
+        const memberData = userSnapshot.data();
+        const nextGroupIds = (memberData.groupIds || []).filter(
+          (groupId) => groupId !== groupIdToDelete
+        );
+        const nextActiveGroupId =
+          memberData.activeGroupId === groupIdToDelete
+            ? nextGroupIds[0] || null
+            : memberData.activeGroupId || null;
+
+        batch.update(doc(db, "users", userSnapshot.id), {
+          groupIds: nextGroupIds,
+          activeGroupId: nextActiveGroupId,
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      await batch.commit();
+
+      const nextGroupIds = (profile.groupIds || []).filter(
+        (groupId) => groupId !== groupIdToDelete
+      );
+
+      (onProfileCreated || setInternalProfile)(
+        buildNextProfile(profile, {
+          groupIds: nextGroupIds,
+          activeGroupId:
+            profile.activeGroupId === groupIdToDelete
+              ? nextGroupIds[0] || null
+              : profile.activeGroupId,
+        })
+      );
+
+      setEditingTransaction(null);
+      setTransactions([]);
+    } catch (error) {
+      console.error("Error al borrar grupo:", error);
+      setGroupError("No se pudo borrar el grupo.");
+    } finally {
+      setDeletingGroupId("");
     }
   }
 
@@ -521,9 +642,29 @@ function HomePage({
                 <p style={{ color: "#6b7280", fontSize: "14px" }}>
                   Miembros:{" "}
                   {(currentGroup.memberIds || [])
-                    .map((memberId) => currentGroup.memberNames?.[memberId] || "Integrante")
+                    .map(
+                      (memberId) =>
+                        currentGroup.memberNames?.[memberId] || "Integrante"
+                    )
                     .join(", ")}
                 </p>
+                {currentGroup.createdBy === user.uid ? (
+                  <button
+                    type="button"
+                    className="button"
+                    style={{
+                      marginTop: "12px",
+                      backgroundColor:
+                        deletingGroupId === currentGroup.id ? "#9ca3af" : "#b42318",
+                    }}
+                    disabled={deletingGroupId === currentGroup.id}
+                    onClick={handleDeleteGroup}
+                  >
+                    {deletingGroupId === currentGroup.id
+                      ? "Borrando grupo..."
+                      : "Borrar grupo"}
+                  </button>
+                ) : null}
               </>
             ) : null}
           </>
@@ -541,7 +682,11 @@ function HomePage({
       <section className="card">
         <h2 style={{ marginBottom: "12px" }}>Crear o unirse a un grupo</h2>
 
-        <form onSubmit={handleCreateGroup} className="form" style={{ marginBottom: "12px" }}>
+        <form
+          onSubmit={handleCreateGroup}
+          className="form"
+          style={{ marginBottom: "12px" }}
+        >
           <input
             type="text"
             placeholder="Nombre del grupo"
@@ -614,6 +759,7 @@ function HomePage({
             <TransactionList
               transactions={transactions}
               memberNames={memberNames}
+              currentUserId={user.uid}
               onEditTransaction={handleEditTransaction}
               onDeleteTransaction={handleDeleteTransaction}
               deletingId={deletingTransactionId}
