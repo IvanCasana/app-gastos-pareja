@@ -10,6 +10,9 @@ Todos los cambios importantes de este proyecto se documentan en este archivo.
 - Lista de movimientos mostrando quien pago y quien cargo cada movimiento.
 - Borrado de grupos desde la app, eliminando tambien sus movimientos asociados.
 - Reglas de Firestore alineadas con grupos y permisos por creador.
+- Rediseño visual mobile-first con panel inferior para crear y editar movimientos.
+- Avatares de integrantes visibles en el resumen del grupo y en la lista de movimientos.
+- Carga progresiva de movimientos con boton `Ver mas`.
 
 ### Cambiado
 - Flujo principal de la app conectado a `HomePage` como pantalla real del producto.
@@ -17,8 +20,13 @@ Todos los cambios importantes de este proyecto se documentan en este archivo.
 - Formulario de movimientos actualizado para usar usuarios reales del grupo en lugar de nombres fijos.
 - Calculo de balance adaptado al grupo actual y a los campos `paidByUserId` y `createdByUserId`.
 - README mejorado para presentacion de portfolio.
+- Texto de saldo actualizado para evitar lenguaje de deuda directa.
+- Categoria por defecto cambiada a `Otros`.
+- Seccion de grupos colapsable manteniendo visible el grupo actual.
+- Login y primer ingreso rediseñados, usando la foto de Google como avatar por defecto cuando existe.
 
 ### Seguridad
+- Lectura de perfiles `users` habilitada para usuarios autenticados, permitiendo mostrar avatares y datos basicos entre integrantes.
 - Lectura de transacciones restringida a miembros del grupo.
 - Creacion de transacciones restringida a miembros del grupo autenticados.
 - Edicion de movimientos restringida al creador del movimiento.

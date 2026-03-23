@@ -17,7 +17,7 @@ function buildInitialFormState(initialValues, members, currentUserId) {
       amount:
         initialValues.amount === undefined ? "" : String(initialValues.amount),
       description: initialValues.description || "",
-      category: initialValues.category || "Supermercado",
+      category: initialValues.category || "Otros",
       type: initialValues.type || "SHARED",
       paidByUserId: initialValues.paidByUserId || defaultPaidBy,
     };
@@ -26,7 +26,7 @@ function buildInitialFormState(initialValues, members, currentUserId) {
   return {
     amount: "",
     description: "",
-    category: "Supermercado",
+    category: "Otros",
     type: "SHARED",
     paidByUserId: defaultPaidBy,
   };
@@ -40,6 +40,8 @@ function TransactionForm({
   isSaving,
   onCancelEdit,
 }) {
+  // El formulario se reinicia por remount desde HomePage al cambiar de grupo
+  // o entrar/salir del modo edicion; por eso no necesita un useEffect de sincronizacion.
   const [formState, setFormState] = useState(() =>
     buildInitialFormState(initialValues, members, currentUserId)
   );
@@ -81,8 +83,15 @@ function TransactionForm({
   }
 
   return (
-    <section style={{ marginTop: "24px" }}>
-      <h2>{initialValues ? "Editar movimiento" : "Agregar movimiento"}</h2>
+    <section className="composer-sheet-content">
+      <div className="composer-sheet-header">
+        <div>
+          <p className="composer-sheet-eyebrow">
+            {initialValues ? "Movimiento existente" : "Nuevo movimiento"}
+          </p>
+          <h2>{initialValues ? "Editar movimiento" : "Agregar movimiento"}</h2>
+        </div>
+      </div>
 
       <form onSubmit={handleSubmit} className="form">
         <input

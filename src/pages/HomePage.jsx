@@ -24,6 +24,8 @@ import CompleteProfile from "../components/CompleteProfile";
 import { calculateBalance, getBalanceMessage } from "../utils/balance";
 import { db, auth } from "../firebase";
 
+const PAGE_SIZE = 10;
+
 function sortTransactionsByCreatedAt(items) {
   return [...items].sort((left, right) => {
     const leftSeconds = left.createdAt?.seconds || 0;
@@ -41,6 +43,10 @@ function buildNextProfile(profile, updates) {
 
 function createInviteCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function getAvatarLetter(username) {
+  return (username || "U").trim().charAt(0).toUpperCase();
 }
 
 function HomePage({
@@ -65,9 +71,15 @@ function HomePage({
   const [newGroupName, setNewGroupName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [groupActionLoading, setGroupActionLoading] = useState(false);
+  const [groupsExpanded, setGroupsExpanded] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [visibleTransactionsCount, setVisibleTransactionsCount] = useState(PAGE_SIZE);
+  const [memberProfiles, setMemberProfiles] = useState({});
 
   const user = externalUser ?? internalUser;
   const profile = externalProfile ?? internalProfile;
+  // HomePage soporta dos modos: integrado dentro de App con sesion ya resuelta,
+  // o usado por su cuenta leyendo Auth y perfil desde Firebase.
   const hasExternalSession =
     externalUser !== undefined && externalProfile !== undefined;
 
@@ -128,6 +140,7 @@ function HomePage({
       setGroupsLoading(true);
 
       try {
+        // Se cargan solo los grupos referenciados por el perfil del usuario.
         const groupDocs = await Promise.all(
           groupIds.map((groupId) => getDoc(doc(db, "groups", groupId)))
         );
@@ -163,12 +176,22 @@ function HomePage({
       username:
         currentGroup.memberNames?.[memberId] ||
         (memberId === user?.uid ? profile?.username : "Integrante"),
+      photoURL:
+        memberProfiles[memberId]?.photoURL ||
+        (memberId === user?.uid ? profile?.photoURL : ""),
     }));
-  }, [currentGroup, profile?.username, user?.uid]);
+  }, [currentGroup, memberProfiles, profile?.photoURL, profile?.username, user?.uid]);
 
   const memberNames = useMemo(() => {
     return currentMembers.reduce((accumulator, member) => {
       accumulator[member.uid] = member.username;
+      return accumulator;
+    }, {});
+  }, [currentMembers]);
+
+  const memberPhotos = useMemo(() => {
+    return currentMembers.reduce((accumulator, member) => {
+      accumulator[member.uid] = member.photoURL || "";
       return accumulator;
     }, {});
   }, [currentMembers]);
@@ -214,10 +237,48 @@ function HomePage({
     return () => unsubscribeFirestore();
   }, [currentGroup?.id, profile, transactionsCollection, user]);
 
+  useEffect(() => {
+    setVisibleTransactionsCount(PAGE_SIZE);
+  }, [currentGroup?.id, transactions.length]);
+
+  useEffect(() => {
+    async function loadMemberProfiles() {
+      if (!currentGroup?.memberIds?.length) {
+        setMemberProfiles({});
+        return;
+      }
+
+      try {
+        const memberEntries = await Promise.all(
+          currentGroup.memberIds.map(async (memberId) => {
+            const userDoc = await getDoc(doc(db, "users", memberId));
+
+            if (!userDoc.exists()) {
+              return [memberId, { photoURL: "" }];
+            }
+
+            const memberData = userDoc.data();
+            return [memberId, { photoURL: memberData.photoURL || "" }];
+          })
+        );
+
+        setMemberProfiles(Object.fromEntries(memberEntries));
+      } catch (error) {
+        console.error("Error al cargar perfiles de miembros:", error);
+        setMemberProfiles({});
+      }
+    }
+
+    loadMemberProfiles();
+  }, [currentGroup?.id, currentGroup?.memberIds]);
+
   const otherMemberName =
     currentMembers.find((member) => member.uid !== user?.uid)?.username || "";
+  // La vista actual y el algoritmo de balance asumen grupos de 2 miembros.
   const balance = calculateBalance(transactions, currentMembers, user?.uid);
   const balanceMessage = getBalanceMessage(balance, otherMemberName);
+  const visibleTransactions = transactions.slice(0, visibleTransactionsCount);
+  const hasMoreTransactions = transactions.length > visibleTransactions.length;
 
   async function persistProfileUpdate(updates) {
     const userRef = doc(db, "users", user.uid);
@@ -268,6 +329,7 @@ function HomePage({
       });
 
       setNewGroupName("");
+      setGroupsExpanded(false);
     } catch (error) {
       console.error("Error al crear grupo:", error);
       setGroupError("No se pudo crear el grupo.");
@@ -290,6 +352,8 @@ function HomePage({
     setGroupActionLoading(true);
 
     try {
+      // Unirse por codigo actualiza el grupo y tambien el perfil del usuario
+      // para que el selector lo muestre disponible de inmediato.
       const groupQuery = query(
         groupsCollection,
         where("inviteCode", "==", cleanCode),
@@ -343,6 +407,7 @@ function HomePage({
       });
 
       setJoinCode("");
+      setGroupsExpanded(false);
     } catch (error) {
       console.error("Error al unirse al grupo:", error);
       setGroupError("No se pudo unir al grupo.");
@@ -363,6 +428,7 @@ function HomePage({
         activeGroupId: groupId,
       });
       setEditingTransaction(null);
+      setComposerOpen(false);
     } catch (error) {
       console.error("Error al cambiar de grupo:", error);
       setGroupError("No se pudo cambiar el grupo activo.");
@@ -391,6 +457,7 @@ function HomePage({
           updatedAt: serverTimestamp(),
         });
         setEditingTransaction(null);
+        setComposerOpen(false);
       } else {
         await addDoc(transactionsCollection, {
           ...transactionData,
@@ -399,6 +466,7 @@ function HomePage({
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
+        setComposerOpen(false);
       }
 
       return true;
@@ -426,6 +494,7 @@ function HomePage({
     }
 
     setEditingTransaction(transaction);
+    setComposerOpen(true);
   }
 
   async function handleDeleteTransaction(transaction) {
@@ -489,6 +558,8 @@ function HomePage({
       const batch = writeBatch(db);
       const groupIdToDelete = currentGroup.id;
 
+      // Borrar un grupo implica borrar sus movimientos y sacar ese groupId
+      // de cada miembro para no dejar perfiles apuntando a un grupo inexistente.
       batch.delete(doc(db, "groups", groupIdToDelete));
 
       const transactionSnapshot = await getDocs(
@@ -546,12 +617,28 @@ function HomePage({
 
       setEditingTransaction(null);
       setTransactions([]);
+      setComposerOpen(false);
     } catch (error) {
       console.error("Error al borrar grupo:", error);
       setGroupError("No se pudo borrar el grupo.");
     } finally {
       setDeletingGroupId("");
     }
+  }
+
+  function handleOpenComposer() {
+    setSaveError("");
+    setEditingTransaction(null);
+    setComposerOpen(true);
+  }
+
+  function handleCloseComposer() {
+    setEditingTransaction(null);
+    setComposerOpen(false);
+  }
+
+  function handleLoadMoreTransactions() {
+    setVisibleTransactionsCount((currentValue) => currentValue + PAGE_SIZE);
   }
 
   if (user === undefined || profile === undefined) {
@@ -580,143 +667,191 @@ function HomePage({
 
   return (
     <main className="container">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: "12px",
-          marginBottom: "16px",
-        }}
-      >
-        <div>
-          <h1 className="title" style={{ marginBottom: "4px" }}>
-            Gastos compartidos
-          </h1>
-          <p style={{ color: "#6b7280", fontSize: "14px" }}>
-            Usuario: {profile.username}
+      <header className="app-shell-header">
+        <div className="app-shell-copy">
+          <p className="header-meta">
+            {profile.username}
+            {currentGroup ? ` · Grupo actual: ${currentGroup.name}` : ""}
           </p>
         </div>
         {onLogout ? (
           <button
             type="button"
-            className="button"
-            style={{ width: "auto", padding: "10px 14px" }}
+            className="button button-ghost"
             onClick={onLogout}
           >
             Cerrar sesion
           </button>
         ) : null}
-      </div>
+      </header>
 
-      <section className="card">
-        <h2 style={{ marginBottom: "12px" }}>Tus grupos</h2>
-
-        {groupsLoading ? <p>Cargando grupos...</p> : null}
-
-        {groups.length > 0 ? (
-          <>
-            <select
-              value={currentGroup?.id || ""}
-              onChange={(event) => handleChangeGroup(event.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px",
-                marginBottom: "12px",
-                borderRadius: "8px",
-                border: "1px solid #d1d5db",
-              }}
-            >
-              {groups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.name}
-                </option>
-              ))}
-            </select>
-
-            {currentGroup ? (
-              <>
-                <p style={{ marginBottom: "6px", color: "#6b7280" }}>
-                  Codigo de invitacion: <strong>{currentGroup.inviteCode}</strong>
-                </p>
-                <p style={{ color: "#6b7280", fontSize: "14px" }}>
-                  Miembros:{" "}
-                  {(currentGroup.memberIds || [])
-                    .map(
-                      (memberId) =>
-                        currentGroup.memberNames?.[memberId] || "Integrante"
-                    )
-                    .join(", ")}
-                </p>
-                {currentGroup.createdBy === user.uid ? (
-                  <button
-                    type="button"
-                    className="button"
-                    style={{
-                      marginTop: "12px",
-                      backgroundColor:
-                        deletingGroupId === currentGroup.id ? "#9ca3af" : "#b42318",
-                    }}
-                    disabled={deletingGroupId === currentGroup.id}
-                    onClick={handleDeleteGroup}
-                  >
-                    {deletingGroupId === currentGroup.id
-                      ? "Borrando grupo..."
-                      : "Borrar grupo"}
-                  </button>
-                ) : null}
-              </>
-            ) : null}
-          </>
-        ) : (
-          <p style={{ marginBottom: "12px", color: "#6b7280" }}>
-            Todavia no perteneces a ningun grupo.
+      <section className="hero-panel">
+        <div className="hero-panel-content">
+          <p className="section-eyebrow">Resumen rapido</p>
+          <h2>{currentGroup ? currentGroup.name : "Sin grupo activo"}</h2>
+          <p className="hero-panel-copy">
+            {isLoading
+              ? "Actualizando balance y movimientos..."
+              : currentGroup
+              ? balanceMessage
+              : "Crea o unete a un grupo para empezar a registrar movimientos."}
           </p>
-        )}
-
-        {groupError ? (
-          <p style={{ color: "#b42318", marginTop: "12px" }}>{groupError}</p>
+          {currentMembers.length > 0 ? (
+            <div className="member-pill-row">
+              {currentMembers.map((member) => (
+                <div key={member.uid} className="member-pill" title={member.username}>
+                  {member.photoURL ? (
+                    <img
+                      src={member.photoURL}
+                      alt={`Avatar de ${member.username}`}
+                      className="member-pill-avatar"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="member-pill-avatar member-pill-avatar-fallback">
+                      {getAvatarLetter(member.username)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {currentGroup ? (
+          <button
+            type="button"
+            className="button hero-panel-button"
+            onClick={handleOpenComposer}
+          >
+            + Agregar movimiento
+          </button>
         ) : null}
       </section>
 
-      <section className="card">
-        <h2 style={{ marginBottom: "12px" }}>Crear o unirse a un grupo</h2>
-
-        <form
-          onSubmit={handleCreateGroup}
-          className="form"
-          style={{ marginBottom: "12px" }}
+      <section className="card group-panel">
+        <button
+          type="button"
+          className="group-panel-toggle"
+          onClick={() => setGroupsExpanded((currentValue) => !currentValue)}
         >
-          <input
-            type="text"
-            placeholder="Nombre del grupo"
-            value={newGroupName}
-            onChange={(event) => setNewGroupName(event.target.value)}
-          />
-          <button
-            type="submit"
-            className="button"
-            disabled={groupActionLoading}
-          >
-            {groupActionLoading ? "Procesando..." : "Crear grupo"}
-          </button>
-        </form>
+          <div>
+            <p className="section-eyebrow">Grupos</p>
+            <h2>{currentGroup ? currentGroup.name : "Sin grupo activo"}</h2>
+          </div>
+          <span>{groupsExpanded ? "Ocultar" : "Mostrar"}</span>
+        </button>
 
-        <form onSubmit={handleJoinGroup} className="form">
-          <input
-            type="text"
-            placeholder="Codigo de invitacion"
-            value={joinCode}
-            onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
-          />
-          <button
-            type="submit"
-            className="button button-secondary"
-            disabled={groupActionLoading}
-          >
-            {groupActionLoading ? "Procesando..." : "Unirme al grupo"}
-          </button>
-        </form>
+        {groupsExpanded ? (
+          <div className="group-panel-body">
+            {groupsLoading ? <p>Cargando grupos...</p> : null}
+
+            {groups.length > 0 ? (
+              <>
+                <p className="group-select-label">Selecciona grupo</p>
+                <div className="group-select-wrap">
+                  <select
+                    value={currentGroup?.id || ""}
+                    onChange={(event) => handleChangeGroup(event.target.value)}
+                  >
+                    {!currentGroup ? (
+                      <option value="" disabled>
+                        Selecciona grupo
+                      </option>
+                    ) : null}
+                    {groups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {currentGroup ? (
+                  <>
+                    <div className="group-meta-grid">
+                      <div className="group-meta-card">
+                        <span>Codigo</span>
+                        <strong>{currentGroup.inviteCode}</strong>
+                      </div>
+                      <div className="group-meta-card">
+                        <span>Miembros</span>
+                        <strong>
+                          {(currentGroup.memberIds || [])
+                            .map(
+                              (memberId) =>
+                                currentGroup.memberNames?.[memberId] || "Integrante"
+                            )
+                            .join(", ")}
+                        </strong>
+                      </div>
+                    </div>
+                    {currentGroup.createdBy === user.uid ? (
+                      <button
+                        type="button"
+                        className="button button-danger"
+                        disabled={deletingGroupId === currentGroup.id}
+                        onClick={handleDeleteGroup}
+                      >
+                        {deletingGroupId === currentGroup.id
+                          ? "Borrando grupo..."
+                          : "Borrar grupo"}
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <p className="group-panel-empty">
+                Todavia no perteneces a ningun grupo.
+              </p>
+            )}
+
+            <section className="group-actions">
+              <div>
+                <p className="section-eyebrow">Acciones del grupo</p>
+                <h3>Crear o unirse</h3>
+              </div>
+
+              <form
+                onSubmit={handleCreateGroup}
+                className="form"
+                style={{ marginBottom: "12px" }}
+              >
+                <input
+                  type="text"
+                  placeholder="Nombre del grupo"
+                  value={newGroupName}
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="button"
+                  disabled={groupActionLoading}
+                >
+                  {groupActionLoading ? "Procesando..." : "Crear grupo"}
+                </button>
+              </form>
+
+              <form onSubmit={handleJoinGroup} className="form">
+                <input
+                  type="text"
+                  placeholder="Codigo de invitacion"
+                  value={joinCode}
+                  onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
+                />
+                <button
+                  type="submit"
+                  className="button button-secondary"
+                  disabled={groupActionLoading}
+                >
+                  {groupActionLoading ? "Procesando..." : "Unirme al grupo"}
+                </button>
+              </form>
+            </section>
+          </div>
+        ) : null}
+
+        {groupError ? <p className="inline-error">{groupError}</p> : null}
       </section>
 
       {transactionsError ? (
@@ -737,14 +872,49 @@ function HomePage({
         </section>
       ) : null}
 
-      <section className="card balance">
-        <h2>Saldo actual</h2>
-        <p>{isLoading ? "Cargando..." : balanceMessage}</p>
-      </section>
+      {currentGroup ? (
+        <div className="card">
+          <TransactionList
+            transactions={visibleTransactions}
+            memberNames={memberNames}
+            memberPhotos={memberPhotos}
+            currentUserId={user.uid}
+            onEditTransaction={handleEditTransaction}
+            onDeleteTransaction={handleDeleteTransaction}
+            deletingId={deletingTransactionId}
+            hasMore={hasMoreTransactions}
+            onLoadMore={handleLoadMoreTransactions}
+          />
+        </div>
+      ) : (
+        <section className="card">
+          <p>Crea o unete a un grupo para empezar a cargar movimientos.</p>
+        </section>
+      )}
 
       {currentGroup ? (
         <>
-          <div className="card" style={{ opacity: isSaving ? 0.7 : 1 }}>
+          <button
+            type="button"
+            className="composer-fab"
+            onClick={handleOpenComposer}
+          >
+            +
+          </button>
+
+          <div
+            className={`composer-sheet-backdrop ${composerOpen ? "is-open" : ""}`}
+            onClick={handleCloseComposer}
+          />
+
+          <aside className={`composer-sheet ${composerOpen ? "is-open" : ""}`}>
+            <button
+              type="button"
+              className="composer-sheet-close"
+              onClick={handleCloseComposer}
+            >
+              Cerrar
+            </button>
             <TransactionForm
               key={`${currentGroup.id}-${editingTransaction?.id || "new"}-${user.uid}`}
               members={currentMembers}
@@ -752,26 +922,11 @@ function HomePage({
               onSaveTransaction={handleSaveTransaction}
               initialValues={editingTransaction}
               isSaving={isSaving}
-              onCancelEdit={() => setEditingTransaction(null)}
+              onCancelEdit={handleCloseComposer}
             />
-          </div>
-
-          <div className="card">
-            <TransactionList
-              transactions={transactions}
-              memberNames={memberNames}
-              currentUserId={user.uid}
-              onEditTransaction={handleEditTransaction}
-              onDeleteTransaction={handleDeleteTransaction}
-              deletingId={deletingTransactionId}
-            />
-          </div>
+          </aside>
         </>
-      ) : (
-        <section className="card">
-          <p>Crea o unete a un grupo para empezar a cargar movimientos.</p>
-        </section>
-      )}
+      ) : null}
     </main>
   );
 }

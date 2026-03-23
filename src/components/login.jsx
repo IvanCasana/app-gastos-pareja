@@ -13,14 +13,19 @@ function Login() {
   }
 
   return (
-    <main className="container">
-      <div className="card" style={{ marginTop: "80px", textAlign: "center" }}>
-        <h1 className="title">Gastos Pareja</h1>
-        <p style={{ marginBottom: "16px" }}>Inicia sesion para continuar</p>
-        <button className="button" onClick={handleLogin}>
+    <main className="auth-screen">
+      <section className="auth-card">
+        <div className="auth-badge">MVP compartido</div>
+        <h1 className="auth-title">Gastos compartidos</h1>
+        <p className="auth-copy">
+          Organiza gastos por grupo, registra movimientos rapido y manten el
+          saldo claro entre ambos.
+        </p>
+        <button className="button auth-google-button" onClick={handleLogin}>
+          <span className="auth-google-mark">G</span>
           Iniciar sesion con Google
         </button>
-      </div>
+      </section>
     </main>
   );
 }

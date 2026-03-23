@@ -6,6 +6,7 @@ import CompleteProfile from "./components/CompleteProfile";
 import HomePage from "./pages/HomePage";
 
 function normalizeProfile(data, user) {
+  // Mantiene compatibilidad con el modelo anterior basado en un solo groupId.
   const legacyGroupId = data?.groupId || null;
   const groupIds = Array.isArray(data?.groupIds)
     ? data.groupIds
@@ -49,6 +50,8 @@ export default function App() {
         const userSnap = await getDoc(userRef);
 
         if (!userSnap.exists()) {
+          // Se crea un perfil minimo para que el primer ingreso siga el flujo
+          // de completar username y elegir grupo sin romper la app.
           const basicUserData = {
             uid: firebaseUser.uid,
             email: firebaseUser.email || "",

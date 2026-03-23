@@ -12,6 +12,7 @@ export function calculateBalance(transactions, members, referenceUserId) {
     if (!amount || Number.isNaN(amount) || !paidByUserId) continue;
 
     if (transaction.type === "SHARED") {
+      // En un gasto compartido, quien pago queda a favor por la mitad.
       if (paidByUserId === referenceUserId) {
         balance += amount / 2;
       } else {
@@ -20,6 +21,7 @@ export function calculateBalance(transactions, members, referenceUserId) {
     }
 
     if (transaction.type === "SETTLEMENT") {
+      // Dar dinero mueve el saldo completo entre una persona y la otra.
       if (paidByUserId === referenceUserId) {
         balance += amount;
       } else {
@@ -37,12 +39,12 @@ export function getBalanceMessage(balance, otherUserName) {
   }
 
   if (balance > 0) {
-    return `${otherUserName} te debe $${balance.toFixed(2)}`;
+    return `Saldo a tu favor: $${balance.toFixed(2)}`;
   }
 
   if (balance < 0) {
-    return `Le debes a ${otherUserName} $${Math.abs(balance).toFixed(2)}`;
+    return `Saldo a favor de ${otherUserName}: $${Math.abs(balance).toFixed(2)}`;
   }
 
-  return `Estas saldado con ${otherUserName}`;
+  return `Saldo equilibrado con ${otherUserName}`;
 }
