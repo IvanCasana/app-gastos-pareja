@@ -26,6 +26,17 @@ import { calculateBalance, getBalanceMessage } from "../utils/balance";
 import { db, auth } from "../firebase";
 
 const PAGE_SIZE = 10;
+let audioContextInstance = null;
+let lastMeowIndex = -1;
+const MEOW_SOUNDS = [
+  "/sounds/dragon-studio-cartoon-kitten-meow-487668.mp3",
+  "/sounds/dragon-studio-cat-meow-321642.mp3",
+  "/sounds/dragon-studio-cat-meow-401729.mp3",
+  "/sounds/dragon-studio-cute-cat-meow-472372.mp3",
+  "/sounds/dragon-studio-meow-sfx-405456.mp3",
+  "/sounds/soundreality-cat-meow-fx-461188.mp3",
+  "/sounds/sound_garage-cat-meow-8-fx-306184.mp3",
+];
 
 function sortTransactionsByCreatedAt(items) {
   return [...items].sort((left, right) => {
@@ -44,6 +55,78 @@ function buildNextProfile(profile, updates) {
 
 function createInviteCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function getAudioContext() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    return null;
+  }
+
+  if (!audioContextInstance) {
+    audioContextInstance = new AudioContextClass();
+  }
+
+  return audioContextInstance;
+}
+
+function playCoinChime() {
+  const audioContext = getAudioContext();
+
+  if (!audioContext) {
+    return;
+  }
+
+  const now = audioContext.currentTime;
+  const notes = [
+    { frequency: 988, start: 0, duration: 0.09 },
+    { frequency: 1318, start: 0.06, duration: 0.1 },
+    { frequency: 1567, start: 0.12, duration: 0.14 },
+  ];
+
+  notes.forEach((note) => {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+
+    oscillator.type = "triangle";
+    oscillator.frequency.setValueAtTime(note.frequency, now + note.start);
+
+    gain.gain.setValueAtTime(0.0001, now + note.start);
+    gain.gain.exponentialRampToValueAtTime(0.16, now + note.start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(
+      0.0001,
+      now + note.start + note.duration
+    );
+
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+
+    oscillator.start(now + note.start);
+    oscillator.stop(now + note.start + note.duration);
+  });
+}
+
+function playRandomMeowSound() {
+  if (typeof window === "undefined" || MEOW_SOUNDS.length === 0) {
+    return;
+  }
+
+  let nextIndex = Math.floor(Math.random() * MEOW_SOUNDS.length);
+
+  if (MEOW_SOUNDS.length > 1 && nextIndex === lastMeowIndex) {
+    nextIndex = (nextIndex + 1) % MEOW_SOUNDS.length;
+  }
+
+  lastMeowIndex = nextIndex;
+
+  const meowAudio = new Audio(MEOW_SOUNDS[nextIndex]);
+  meowAudio.volume = 0.65;
+  void meowAudio.play().catch(() => {});
 }
 
 function HomePage({
@@ -76,6 +159,7 @@ function HomePage({
   const [profileSaveError, setProfileSaveError] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
+  const [logoBubble, setLogoBubble] = useState(false);
 
   const user = externalUser ?? internalUser;
   const profile = externalProfile ?? internalProfile;
@@ -544,7 +628,7 @@ function HomePage({
     }
 
     const confirmed = window.confirm(
-      "¿Seguro que quieres borrar este movimiento?"
+      "Seguro que quieres borrar este movimiento?"
     );
 
     if (!confirmed) {
@@ -582,7 +666,7 @@ function HomePage({
     }
 
     const confirmed = window.confirm(
-      "¿Seguro que quieres borrar este grupo? Se eliminaran tambien sus movimientos para todos."
+      "Seguro que quieres borrar este grupo? Se eliminaran tambien sus movimientos para todos."
     );
 
     if (!confirmed) {
@@ -778,6 +862,15 @@ function HomePage({
     setProfileSheetOpen(false);
   }
 
+  async function handleLogoClick() {
+    playCoinChime();
+    window.setTimeout(() => {
+      playRandomMeowSound();
+    }, 120);
+    setLogoBubble(true);
+    window.setTimeout(() => setLogoBubble(false), 1400);
+  }
+
   if (user === undefined || profile === undefined) {
     return (
       <main className="container">
@@ -805,11 +898,26 @@ function HomePage({
   return (
     <main className="container">
       <header className="app-shell-header">
-        <div className="app-shell-copy">
-          <p className="header-meta">
-            {profile.username}
-            {currentGroup ? ` · Grupo actual: ${currentGroup.name}` : ""}
-          </p>
+        <div className="header-identity">
+          <button
+            type="button"
+            className="header-logo-button"
+            onClick={handleLogoClick}
+            aria-label="Activar sonido del logo"
+          >
+            <img
+              src="/icon-32.png"
+              alt="Logo de Gastos Compartidos"
+              className="header-logo"
+            />
+            {logoBubble ? <span className="header-logo-bubble">miau</span> : null}
+          </button>
+          <div className="app-shell-copy">
+            <p className="header-meta">
+              {profile.username}
+              {currentGroup ? ` - Grupo actual: ${currentGroup.name}` : ""}
+            </p>
+          </div>
         </div>
         <div className="header-actions">
           <button

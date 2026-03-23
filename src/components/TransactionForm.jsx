@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import categories from "../data/categories";
 
+const AMOUNT_INPUT_PATTERN = /^\d{0,9}([.,]\d{0,2})?$/;
+
 function getDefaultPaidBy(members, currentUserId) {
   if (currentUserId && members.some((member) => member.uid === currentUserId)) {
     return currentUserId;
@@ -13,12 +15,14 @@ function buildInitialFormState(initialValues, members, currentUserId) {
   const defaultPaidBy = getDefaultPaidBy(members, currentUserId);
 
   if (initialValues) {
+    const nextType = initialValues.type || "SHARED";
+
     return {
       amount:
         initialValues.amount === undefined ? "" : String(initialValues.amount),
       description: initialValues.description || "",
-      category: initialValues.category || "Otros",
-      type: initialValues.type || "SHARED",
+      category: nextType === "SETTLEMENT" ? "" : initialValues.category || "",
+      type: nextType,
       paidByUserId: initialValues.paidByUserId || defaultPaidBy,
     };
   }
@@ -26,10 +30,14 @@ function buildInitialFormState(initialValues, members, currentUserId) {
   return {
     amount: "",
     description: "",
-    category: "Otros",
+    category: "",
     type: "SHARED",
     paidByUserId: defaultPaidBy,
   };
+}
+
+function normalizeAmountInput(rawValue) {
+  return rawValue.replace(",", ".");
 }
 
 function TransactionForm({
@@ -45,29 +53,82 @@ function TransactionForm({
   const [formState, setFormState] = useState(() =>
     buildInitialFormState(initialValues, members, currentUserId)
   );
+  const [showAmountHint, setShowAmountHint] = useState(false);
+  const [amountHintPulse, setAmountHintPulse] = useState(false);
+  const [showCategoryHint, setShowCategoryHint] = useState(false);
+  const [categoryHintPulse, setCategoryHintPulse] = useState(false);
   const { amount, description, category, type, paidByUserId } = formState;
 
-  const numericAmount = Number(amount);
+  const normalizedAmount = normalizeAmountInput(amount);
+  const numericAmount = Number(normalizedAmount);
 
   const amountError = useMemo(() => {
-    if (amount === "") return "";
+    if (amount === "") return "Ingresa un monto";
+    if (!AMOUNT_INPUT_PATTERN.test(amount)) {
+      return "Usa hasta 9 digitos enteros y 2 decimales";
+    }
     if (Number.isNaN(numericAmount)) return "El monto debe ser un numero";
     if (numericAmount <= 0) return "El monto debe ser mayor a 0";
     return "";
   }, [amount, numericAmount]);
 
-  const isFormValid =
-    amount !== "" && amountError === "" && Boolean(paidByUserId);
+  const categoryError = useMemo(() => {
+    if (type !== "SHARED") return "";
+    if (!category) return "Selecciona una categoria";
+    return "";
+  }, [category, type]);
+
+  const isFormValid = Boolean(paidByUserId);
+
+  function triggerAmountHint() {
+    setShowAmountHint(true);
+    setAmountHintPulse(false);
+
+    window.requestAnimationFrame(() => {
+      setAmountHintPulse(true);
+    });
+
+    window.setTimeout(() => {
+      setAmountHintPulse(false);
+    }, 280);
+  }
+
+  function triggerCategoryHint() {
+    setShowCategoryHint(true);
+    setCategoryHintPulse(false);
+
+    window.requestAnimationFrame(() => {
+      setCategoryHintPulse(true);
+    });
+
+    window.setTimeout(() => {
+      setCategoryHintPulse(false);
+    }, 280);
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
 
     if (!isFormValid) return;
+    if (categoryError) {
+      if (amountError) {
+        triggerAmountHint();
+        return;
+      }
+
+      triggerCategoryHint();
+      return;
+    }
+
+    if (amountError) {
+      triggerAmountHint();
+      return;
+    }
 
     const transactionPayload = {
       amount: Math.round(numericAmount * 100) / 100,
       description: description.trim(),
-      category,
+      category: type === "SETTLEMENT" ? "" : category,
       type,
       paidByUserId,
       date: new Date().toISOString().split("T")[0],
@@ -95,33 +156,36 @@ function TransactionForm({
 
       <form onSubmit={handleSubmit} className="form">
         <input
-          type="number"
+          type="text"
           inputMode="decimal"
-          step="0.01"
-          min="0"
           placeholder="Monto"
           value={amount}
-          onChange={(event) =>
+          onChange={(event) => {
+            const nextValue = normalizeAmountInput(event.target.value);
+
+            if (nextValue !== "" && !AMOUNT_INPUT_PATTERN.test(nextValue)) {
+              return;
+            }
+
             setFormState((currentState) => ({
               ...currentState,
-              amount: event.target.value,
-            }))
-          }
+              amount: nextValue,
+            }));
+            setShowAmountHint(false);
+            setAmountHintPulse(false);
+          }}
           autoFocus
         />
 
-        {amountError && (
+        {showAmountHint && amountError ? (
           <p
-            style={{
-              color: "#b42318",
-              fontSize: "13px",
-              marginTop: "-4px",
-              marginBottom: "10px",
-            }}
+            className={`inline-field-hint ${
+              amountHintPulse ? "inline-field-hint-pulse" : ""
+            }`}
           >
             {amountError}
           </p>
-        )}
+        ) : null}
 
         <input
           placeholder="Descripcion"
@@ -135,33 +199,58 @@ function TransactionForm({
         />
 
         <select
-          value={category}
-          onChange={(event) =>
-            setFormState((currentState) => ({
-              ...currentState,
-              category: event.target.value,
-            }))
-          }
-        >
-          {categories.map((categoryOption) => (
-            <option key={categoryOption} value={categoryOption}>
-              {categoryOption}
-            </option>
-          ))}
-        </select>
-
-        <select
           value={type}
-          onChange={(event) =>
+          onChange={(event) => {
             setFormState((currentState) => ({
               ...currentState,
               type: event.target.value,
-            }))
-          }
+              category:
+                event.target.value === "SETTLEMENT"
+                  ? ""
+                  : currentState.category,
+            }));
+            setShowCategoryHint(false);
+            setCategoryHintPulse(false);
+          }}
         >
           <option value="SHARED">Compartido</option>
           <option value="SETTLEMENT">Dar dinero</option>
         </select>
+
+        {type === "SHARED" ? (
+          <>
+            <select
+              value={category}
+              onChange={(event) =>
+                {
+                  setFormState((currentState) => ({
+                    ...currentState,
+                    category: event.target.value,
+                  }));
+                  setShowCategoryHint(false);
+                  setCategoryHintPulse(false);
+                }
+              }
+            >
+              <option value="">Selecciona una categoria</option>
+              {categories.map((categoryOption) => (
+                <option key={categoryOption} value={categoryOption}>
+                  {categoryOption}
+                </option>
+              ))}
+            </select>
+
+            {showCategoryHint && categoryError ? (
+              <p
+                className={`inline-field-hint ${
+                  categoryHintPulse ? "inline-field-hint-pulse" : ""
+                }`}
+              >
+                {categoryError}
+              </p>
+            ) : null}
+          </>
+        ) : null}
 
         <select
           value={paidByUserId}
@@ -184,8 +273,8 @@ function TransactionForm({
           className="button"
           disabled={!isFormValid || isSaving}
           style={{
-            opacity: isFormValid && !isSaving ? 1 : 0.6,
-            cursor: isFormValid && !isSaving ? "pointer" : "not-allowed",
+            opacity: isSaving ? 0.6 : 1,
+            cursor: isSaving ? "not-allowed" : "pointer",
             marginBottom: initialValues ? "8px" : 0,
           }}
         >
