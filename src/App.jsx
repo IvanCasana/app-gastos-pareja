@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { auth, provider, db } from "./firebase";
+import { auth, db } from "./firebase";
 import CompleteProfile from "./components/CompleteProfile";
+import Login from "./components/login";
 import HomePage from "./pages/HomePage";
+import { signInWithGoogle } from "./utils/auth";
 
 function normalizeProfile(data, user) {
   // Mantiene compatibilidad con el modelo anterior basado en un solo groupId.
@@ -88,7 +90,7 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
-      await signInWithPopup(auth, provider);
+      await signInWithGoogle(auth);
     } catch (error) {
       console.error("Error al iniciar sesion:", error);
     }
@@ -107,12 +109,7 @@ export default function App() {
   }
 
   if (!user) {
-    return (
-      <div style={{ padding: 24 }}>
-        <h1>App de gastos compartidos</h1>
-        <button onClick={handleLogin}>Ingresar con Google</button>
-      </div>
-    );
+    return <Login onLogin={handleLogin} />;
   }
 
   if (!profile || !profile.username?.trim()) {

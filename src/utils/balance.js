@@ -1,3 +1,5 @@
+import { formatCurrencyAmount } from "./currency";
+
 export function calculateBalance(transactions, members, referenceUserId) {
   if (!referenceUserId || !Array.isArray(members) || members.length !== 2) {
     return 0;
@@ -39,11 +41,13 @@ export function getBalanceMessage(balance, otherUserName) {
   }
 
   if (balance > 0) {
-    return `Saldo a tu favor: $${balance.toFixed(2)}`;
+    return `Saldo a tu favor: $${formatCurrencyAmount(balance)}`;
   }
 
   if (balance < 0) {
-    return `Saldo a favor de ${otherUserName}: $${Math.abs(balance).toFixed(2)}`;
+    return `Saldo a favor de ${otherUserName}: $${formatCurrencyAmount(
+      Math.abs(balance)
+    )}`;
   }
 
   return `Saldo equilibrado con ${otherUserName}`;

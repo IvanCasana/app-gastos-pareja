@@ -1,6 +1,6 @@
 {
-  "name": "Gastos Compartidos",
-  "short_name": "Gastos",
+  "name": "Miticuenta",
+  "short_name": "Miticuenta",
   "description": "App para registrar gastos compartidos y calcular balances entre integrantes.",
   "start_url": "/",
   "scope": "/",

@@ -1,4 +1,4 @@
-const CACHE_NAME = "gastos-compartidos-v1";
+const CACHE_NAME = "miticuenta-v2";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -36,6 +36,8 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const requestUrl = new URL(event.request.url);
+
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request).catch(() => caches.match("/index.html"))
@@ -43,24 +45,35 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  if (requestUrl.origin !== self.location.origin) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
+    caches.match(event.request).then(async (cachedResponse) => {
       if (cachedResponse) {
         return cachedResponse;
       }
 
-      return fetch(event.request).then((networkResponse) => {
-        if (!networkResponse || networkResponse.status !== 200) {
+      try {
+        const networkResponse = await fetch(event.request);
+
+        if (
+          !networkResponse ||
+          networkResponse.status !== 200 ||
+          networkResponse.type !== "basic"
+        ) {
           return networkResponse;
         }
 
-        const responseClone = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone);
-        });
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(event.request, networkResponse.clone());
 
         return networkResponse;
-      });
+      } catch {
+        return caches.match(event.request);
+      }
     })
   );
 });

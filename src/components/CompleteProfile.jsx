@@ -8,6 +8,8 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 
+const USERNAME_MAX_LENGTH = 24;
+
 function getAvatarLetter(user, profile) {
   const seed = profile?.username || user?.displayName || user?.email || "U";
   return seed.trim().charAt(0).toUpperCase();
@@ -30,6 +32,11 @@ export default function CompleteProfile({ user, profile, onProfileCreated }) {
 
     if (cleanUsername.length < 3) {
       setError("El nombre de usuario debe tener al menos 3 caracteres.");
+      return;
+    }
+
+    if (cleanUsername.length > USERNAME_MAX_LENGTH) {
+      setError(`El nombre de usuario no puede superar ${USERNAME_MAX_LENGTH} caracteres.`);
       return;
     }
 
@@ -124,7 +131,10 @@ export default function CompleteProfile({ user, profile, onProfileCreated }) {
             type="text"
             placeholder="Tu nombre visible"
             value={username}
-            onChange={(event) => setUsername(event.target.value)}
+            maxLength={USERNAME_MAX_LENGTH}
+            onChange={(event) =>
+              setUsername(event.target.value.slice(0, USERNAME_MAX_LENGTH))
+            }
           />
 
           <button type="submit" className="button" disabled={saving}>

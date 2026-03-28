@@ -19,115 +19,22 @@ import { onAuthStateChanged } from "firebase/auth";
 import TransactionForm from "../components/TransactionForm";
 import TransactionList from "../components/TransactionList";
 import ProfileSheet from "../components/ProfileSheet";
+import StatisticsSheet from "../components/StatisticsSheet";
 import UserAvatar from "../components/UserAvatar";
 import Login from "../components/login";
 import CompleteProfile from "../components/CompleteProfile";
-import { calculateBalance, getBalanceMessage } from "../utils/balance";
+import { calculateBalance } from "../utils/balance";
+import { formatCurrencyAmount, splitCurrencyAmount } from "../utils/currency";
+import {
+  buildNextProfile,
+  createInviteCode,
+  GROUP_NAME_MAX_LENGTH,
+  INVITE_CODE_LENGTH,
+  PAGE_SIZE,
+  playLogoSoundSequence,
+  sortTransactionsByCreatedAt,
+} from "../utils/homePage";
 import { db, auth } from "../firebase";
-
-const PAGE_SIZE = 10;
-let audioContextInstance = null;
-let lastMeowIndex = -1;
-const MEOW_SOUNDS = [
-  "/sounds/dragon-studio-cartoon-kitten-meow-487668.mp3",
-  "/sounds/dragon-studio-cat-meow-321642.mp3",
-  "/sounds/dragon-studio-cat-meow-401729.mp3",
-  "/sounds/dragon-studio-cute-cat-meow-472372.mp3",
-  "/sounds/dragon-studio-meow-sfx-405456.mp3",
-  "/sounds/soundreality-cat-meow-fx-461188.mp3",
-  "/sounds/sound_garage-cat-meow-8-fx-306184.mp3",
-];
-
-function sortTransactionsByCreatedAt(items) {
-  return [...items].sort((left, right) => {
-    const leftSeconds = left.createdAt?.seconds || 0;
-    const rightSeconds = right.createdAt?.seconds || 0;
-    return rightSeconds - leftSeconds;
-  });
-}
-
-function buildNextProfile(profile, updates) {
-  return {
-    ...profile,
-    ...updates,
-  };
-}
-
-function createInviteCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
-}
-
-function getAudioContext() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-
-  if (!AudioContextClass) {
-    return null;
-  }
-
-  if (!audioContextInstance) {
-    audioContextInstance = new AudioContextClass();
-  }
-
-  return audioContextInstance;
-}
-
-function playCoinChime() {
-  const audioContext = getAudioContext();
-
-  if (!audioContext) {
-    return;
-  }
-
-  const now = audioContext.currentTime;
-  const notes = [
-    { frequency: 988, start: 0, duration: 0.09 },
-    { frequency: 1318, start: 0.06, duration: 0.1 },
-    { frequency: 1567, start: 0.12, duration: 0.14 },
-  ];
-
-  notes.forEach((note) => {
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-
-    oscillator.type = "triangle";
-    oscillator.frequency.setValueAtTime(note.frequency, now + note.start);
-
-    gain.gain.setValueAtTime(0.0001, now + note.start);
-    gain.gain.exponentialRampToValueAtTime(0.16, now + note.start + 0.02);
-    gain.gain.exponentialRampToValueAtTime(
-      0.0001,
-      now + note.start + note.duration
-    );
-
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
-
-    oscillator.start(now + note.start);
-    oscillator.stop(now + note.start + note.duration);
-  });
-}
-
-function playRandomMeowSound() {
-  if (typeof window === "undefined" || MEOW_SOUNDS.length === 0) {
-    return;
-  }
-
-  let nextIndex = Math.floor(Math.random() * MEOW_SOUNDS.length);
-
-  if (MEOW_SOUNDS.length > 1 && nextIndex === lastMeowIndex) {
-    nextIndex = (nextIndex + 1) % MEOW_SOUNDS.length;
-  }
-
-  lastMeowIndex = nextIndex;
-
-  const meowAudio = new Audio(MEOW_SOUNDS[nextIndex]);
-  meowAudio.volume = 0.65;
-  void meowAudio.play().catch(() => {});
-}
 
 function HomePage({
   user: externalUser,
@@ -150,16 +57,23 @@ function HomePage({
   const [deletingGroupId, setDeletingGroupId] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
   const [joinCode, setJoinCode] = useState("");
-  const [groupActionLoading, setGroupActionLoading] = useState(false);
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [joiningGroup, setJoiningGroup] = useState(false);
+  const [leavingGroup, setLeavingGroup] = useState(false);
+  const [copyingInvite, setCopyingInvite] = useState(false);
+  const [removingMemberId, setRemovingMemberId] = useState("");
   const [groupsExpanded, setGroupsExpanded] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
+  const [statisticsSheetOpen, setStatisticsSheetOpen] = useState(false);
   const [visibleTransactionsCount, setVisibleTransactionsCount] = useState(PAGE_SIZE);
   const [memberProfiles, setMemberProfiles] = useState({});
   const [profileSaveError, setProfileSaveError] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [logoBubble, setLogoBubble] = useState(false);
+  const [uiToast, setUiToast] = useState("");
+  const [isBalanceHidden, setIsBalanceHidden] = useState(false);
 
   const user = externalUser ?? internalUser;
   const profile = externalProfile ?? internalProfile;
@@ -228,47 +142,101 @@ function HomePage({
     };
   }, []);
 
+  useEffect(() => {
+    if (!uiToast) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setUiToast("");
+    }, 2200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [uiToast]);
+
   const transactionsCollection = useMemo(() => collection(db, "transactions"), []);
   const groupsCollection = useMemo(() => collection(db, "groups"), []);
 
   useEffect(() => {
-    async function loadGroups() {
-      const groupIds = Array.isArray(profile?.groupIds) ? profile.groupIds : [];
+    if (!user || !profile) {
+      setGroups([]);
+      setGroupsLoading(false);
+      return undefined;
+    }
 
-      if (!user || !profile || groupIds.length === 0) {
-        setGroups([]);
+    setGroupsLoading(true);
+
+    const memberGroupsQuery = query(
+      groupsCollection,
+      where("memberIds", "array-contains", user.uid)
+    );
+
+    const unsubscribeGroups = onSnapshot(
+      memberGroupsQuery,
+      (snapshot) => {
+        const nextGroups = snapshot.docs.map((groupDoc) => ({
+          id: groupDoc.id,
+          ...groupDoc.data(),
+        }));
+
+        setGroups(nextGroups);
+        setGroupError("");
         setGroupsLoading(false);
+      },
+      (error) => {
+        console.error("Error al cargar grupos:", error);
+        setGroupError("No se pudieron cargar tus grupos.");
+        setGroupsLoading(false);
+      }
+    );
+
+    return () => unsubscribeGroups();
+  }, [groupsCollection, profile, user]);
+
+  useEffect(() => {
+    async function syncProfileGroups() {
+      const actualGroupIds = groups.map((group) => group.id);
+      const storedGroupIds = Array.isArray(profile.groupIds) ? profile.groupIds : [];
+      const nextActiveGroupId =
+        groups.find((group) => group.id === profile.activeGroupId)?.id ||
+        actualGroupIds[0] ||
+        null;
+
+      const groupIdsChanged =
+        actualGroupIds.length !== storedGroupIds.length ||
+        actualGroupIds.some((groupId) => !storedGroupIds.includes(groupId));
+      const activeGroupChanged = (profile.activeGroupId || null) !== nextActiveGroupId;
+
+      if (!groupIdsChanged && !activeGroupChanged) {
         return;
       }
 
-      setGroupsLoading(true);
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        groupIds: actualGroupIds,
+        activeGroupId: nextActiveGroupId,
+        updatedAt: serverTimestamp(),
+      });
 
-      try {
-        // Se cargan solo los grupos referenciados por el perfil del usuario.
-        const groupDocs = await Promise.all(
-          groupIds.map((groupId) => getDoc(doc(db, "groups", groupId)))
-        );
-
-        const nextGroups = groupDocs
-          .filter((groupDoc) => groupDoc.exists())
-          .map((groupDoc) => ({
-            id: groupDoc.id,
-            ...groupDoc.data(),
-          }));
-
-        setGroups(nextGroups);
-      } catch (error) {
-        console.error("Error al cargar grupos:", error);
-        setGroupError("No se pudieron cargar tus grupos.");
-      } finally {
-        setGroupsLoading(false);
-      }
+      (onProfileCreated || setInternalProfile)(
+        buildNextProfile(profile, {
+          groupIds: actualGroupIds,
+          activeGroupId: nextActiveGroupId,
+        })
+      );
     }
 
-    loadGroups();
-  }, [profile, user]);
+    if (!user || !profile) {
+      return;
+    }
 
-  const currentGroupId = profile?.activeGroupId || profile?.groupIds?.[0] || null;
+    void syncProfileGroups();
+  }, [groups, onProfileCreated, profile, user]);
+
+  const currentGroupId =
+    groups.find((group) => group.id === profile?.activeGroupId)?.id ||
+    groups[0]?.id ||
+    null;
   const currentGroup =
     groups.find((group) => group.id === currentGroupId) || groups[0] || null;
 
@@ -398,9 +366,64 @@ function HomePage({
     currentMembers.find((member) => member.uid !== user?.uid)?.username || "";
   // La vista actual y el algoritmo de balance asumen grupos de 2 miembros.
   const balance = calculateBalance(transactions, currentMembers, user?.uid);
-  const balanceMessage = getBalanceMessage(balance, otherMemberName);
   const visibleTransactions = transactions.slice(0, visibleTransactionsCount);
   const hasMoreTransactions = transactions.length > visibleTransactions.length;
+  const isBalanced = currentGroup && currentMembers.length === 2 && balance === 0;
+  const hasCounterpart = currentGroup && currentMembers.length === 2;
+  const balanceAmountLabel = `$${formatCurrencyAmount(Math.abs(balance))}`;
+  const balanceAmountParts = splitCurrencyAmount(Math.abs(balance));
+  const balanceAmountGroups = balanceAmountParts.integerPart.split(".");
+
+  function getHeroBalanceSummary() {
+    if (!currentGroup) {
+      return {
+        title: "",
+        amount: "",
+      };
+    }
+
+    if (isLoading) {
+      return {
+        title: "Actualizando balance",
+        amount: "",
+      };
+    }
+
+    if (isBalanceHidden) {
+      return {
+        title: hasCounterpart ? "Balance actual" : "Esperando otro integrante",
+        amount: "••••••",
+      };
+    }
+
+    if (!hasCounterpart) {
+      return {
+        title: "Invita a alguien para ver el saldo",
+        amount: "",
+      };
+    }
+
+    if (balance > 0) {
+      return {
+        title: `Saldo a tu favor de ${otherMemberName}:`,
+        amount: balanceAmountLabel,
+      };
+    }
+
+    if (balance < 0) {
+      return {
+        title: `Saldo a favor de ${otherMemberName}:`,
+        amount: balanceAmountLabel,
+      };
+    }
+
+    return {
+      title: `Estan a mano con ${otherMemberName}`,
+      amount: "",
+    };
+  }
+
+  const heroBalanceSummary = getHeroBalanceSummary();
 
   async function persistProfileUpdate(updates) {
     const userRef = doc(db, "users", user.uid);
@@ -425,11 +448,20 @@ function HomePage({
       return;
     }
 
-    setGroupActionLoading(true);
+    if (cleanName.length > GROUP_NAME_MAX_LENGTH) {
+      setGroupError(`El nombre del grupo no puede superar ${GROUP_NAME_MAX_LENGTH} caracteres.`);
+      return;
+    }
+
+    if (creatingGroup || joiningGroup) {
+      return;
+    }
+
+    setCreatingGroup(true);
 
     try {
       const groupRef = doc(groupsCollection);
-      const nextGroupIds = [...new Set([...(profile.groupIds || []), groupRef.id])];
+      const nextGroupIds = [...new Set([...groups.map((group) => group.id), groupRef.id])];
 
       await setDoc(groupRef, {
         name: cleanName,
@@ -452,11 +484,12 @@ function HomePage({
 
       setNewGroupName("");
       setGroupsExpanded(false);
+      setUiToast("Grupo creado");
     } catch (error) {
       console.error("Error al crear grupo:", error);
       setGroupError("No se pudo crear el grupo.");
     } finally {
-      setGroupActionLoading(false);
+      setCreatingGroup(false);
     }
   }
 
@@ -471,7 +504,11 @@ function HomePage({
       return;
     }
 
-    setGroupActionLoading(true);
+    if (creatingGroup || joiningGroup) {
+      return;
+    }
+
+    setJoiningGroup(true);
 
     try {
       // Unirse por codigo actualiza el grupo y tambien el perfil del usuario
@@ -509,9 +546,7 @@ function HomePage({
         ...(groupData.memberNames || {}),
         [user.uid]: profile.username,
       };
-      const nextGroupIds = [
-        ...new Set([...(profile.groupIds || []), groupDoc.id]),
-      ];
+      const nextGroupIds = [...new Set([...groups.map((group) => group.id), groupDoc.id])];
 
       await setDoc(
         doc(db, "groups", groupDoc.id),
@@ -530,11 +565,12 @@ function HomePage({
 
       setJoinCode("");
       setGroupsExpanded(false);
+      setUiToast("Te uniste al grupo");
     } catch (error) {
       console.error("Error al unirse al grupo:", error);
       setGroupError("No se pudo unir al grupo.");
     } finally {
-      setGroupActionLoading(false);
+      setJoiningGroup(false);
     }
   }
 
@@ -554,6 +590,136 @@ function HomePage({
     } catch (error) {
       console.error("Error al cambiar de grupo:", error);
       setGroupError("No se pudo cambiar el grupo activo.");
+    }
+  }
+
+  async function handleCopyInviteCode() {
+    if (!currentGroup?.inviteCode || copyingInvite) {
+      return;
+    }
+
+    setGroupError("");
+    setCopyingInvite(true);
+
+    try {
+      await navigator.clipboard.writeText(currentGroup.inviteCode);
+      setUiToast("Codigo copiado");
+    } catch (error) {
+      console.error("Error al copiar codigo:", error);
+      setGroupError(`No se pudo copiar el codigo. Es: ${currentGroup.inviteCode}`);
+    } finally {
+      setCopyingInvite(false);
+    }
+  }
+
+  async function handleLeaveGroup() {
+    if (!currentGroup || !user || !profile) {
+      return;
+    }
+
+    if (currentGroup.createdBy === user.uid) {
+      setGroupError("El admin no puede salir del grupo.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Seguro que quieres salir del grupo? Tus movimientos quedaran en el historial."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setGroupError("");
+    setLeavingGroup(true);
+
+    try {
+      const nextMemberIds = (currentGroup.memberIds || []).filter(
+        (memberId) => memberId !== user.uid
+      );
+      const nextMemberNames = { ...(currentGroup.memberNames || {}) };
+      delete nextMemberNames[user.uid];
+
+      await setDoc(
+        doc(db, "groups", currentGroup.id),
+        {
+          memberIds: nextMemberIds,
+          memberNames: nextMemberNames,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      const nextGroupIds = groups
+        .map((group) => group.id)
+        .filter((groupId) => groupId !== currentGroup.id);
+
+      await persistProfileUpdate({
+        groupIds: nextGroupIds,
+        activeGroupId:
+          profile.activeGroupId === currentGroup.id ? nextGroupIds[0] || null : profile.activeGroupId,
+      });
+
+      setEditingTransaction(null);
+      setComposerOpen(false);
+      setUiToast("Saliste del grupo");
+    } catch (error) {
+      console.error("Error al salir del grupo:", error);
+      setGroupError("No se pudo salir del grupo.");
+    } finally {
+      setLeavingGroup(false);
+    }
+  }
+
+  async function handleRemoveMember(memberId) {
+    if (!currentGroup || !user) {
+      return;
+    }
+
+    if (currentGroup.createdBy !== user.uid) {
+      setGroupError("Solo el admin puede sacar integrantes.");
+      return;
+    }
+
+    if (memberId === user.uid) {
+      setGroupError("El admin no puede sacarse del grupo.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Seguro que quieres sacar a esta persona del grupo? Sus movimientos quedaran en el historial."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setGroupError("");
+    setRemovingMemberId(memberId);
+
+    try {
+      const nextMemberIds = (currentGroup.memberIds || []).filter(
+        (currentMemberId) => currentMemberId !== memberId
+      );
+      const nextMemberNames = { ...(currentGroup.memberNames || {}) };
+      delete nextMemberNames[memberId];
+
+      await setDoc(
+        doc(db, "groups", currentGroup.id),
+        {
+          memberIds: nextMemberIds,
+          memberNames: nextMemberNames,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      setUiToast("Integrante eliminado");
+    } catch (error) {
+      console.error("Error al sacar integrante:", error);
+      setGroupError("No se pudo sacar a la persona del grupo.");
+    } finally {
+      setRemovingMemberId("");
     }
   }
 
@@ -580,6 +746,7 @@ function HomePage({
         });
         setEditingTransaction(null);
         setComposerOpen(false);
+        setUiToast("Movimiento actualizado");
       } else {
         await addDoc(transactionsCollection, {
           ...transactionData,
@@ -589,6 +756,7 @@ function HomePage({
           updatedAt: serverTimestamp(),
         });
         setComposerOpen(false);
+        setUiToast("Movimiento guardado");
       }
 
       return true;
@@ -723,9 +891,9 @@ function HomePage({
 
       await batch.commit();
 
-      const nextGroupIds = (profile.groupIds || []).filter(
-        (groupId) => groupId !== groupIdToDelete
-      );
+      const nextGroupIds = groups
+        .map((group) => group.id)
+        .filter((groupId) => groupId !== groupIdToDelete);
 
       (onProfileCreated || setInternalProfile)(
         buildNextProfile(profile, {
@@ -824,7 +992,7 @@ function HomePage({
 
       // El username visible debe mantenerse sincronizado dentro de cada grupo
       // donde el usuario ya figura como miembro.
-      for (const groupId of profile.groupIds || []) {
+      for (const groupId of groups.map((group) => group.id)) {
         batch.update(doc(db, "groups", groupId), {
           [`memberNames.${user.uid}`]: cleanUsername,
           updatedAt: serverTimestamp(),
@@ -863,10 +1031,7 @@ function HomePage({
   }
 
   async function handleLogoClick() {
-    playCoinChime();
-    window.setTimeout(() => {
-      playRandomMeowSound();
-    }, 120);
+    playLogoSoundSequence();
     setLogoBubble(true);
     window.setTimeout(() => setLogoBubble(false), 1400);
   }
@@ -898,28 +1063,47 @@ function HomePage({
   return (
     <main className="container">
       <header className="app-shell-header">
-        <div className="header-identity">
-          <button
-            type="button"
-            className="header-logo-button"
-            onClick={handleLogoClick}
-            aria-label="Activar sonido del logo"
-          >
-            <img
-              src="/icon-32.png"
-              alt="Logo de Gastos Compartidos"
-              className="header-logo"
-            />
-            {logoBubble ? <span className="header-logo-bubble">miau</span> : null}
-          </button>
-          <div className="app-shell-copy">
-            <p className="header-meta">
-              {profile.username}
-              {currentGroup ? ` - Grupo actual: ${currentGroup.name}` : ""}
-            </p>
+        <div className="header-identity-card">
+          <div className="header-identity">
+            <button
+              type="button"
+              className="header-logo-button"
+              onClick={handleLogoClick}
+              aria-label="Activar sonido del logo"
+            >
+              <img
+                src="/icon-32.png"
+                alt="Logo de Miticuenta"
+                className="header-logo"
+              />
+              {logoBubble ? <span className="header-logo-bubble">miau</span> : null}
+            </button>
+            <div className="app-shell-copy">
+              <p className="header-kicker">Miticuenta</p>
+              <p className="header-user">{profile.username}</p>
+            </div>
+          </div>
+          <div className="header-status-row">
+            <span className="header-status-chip">
+              {currentGroup ? `Grupo actual: ${currentGroup.name}` : "Sin grupo activo"}
+            </span>
+            <span className="header-status-chip header-status-chip-soft">
+              {currentGroup
+                ? `${currentMembers.length} ${currentMembers.length === 1 ? "integrante" : "integrantes"}`
+                : "Empieza creando un grupo"}
+            </span>
           </div>
         </div>
         <div className="header-actions">
+          {currentGroup ? (
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => setStatisticsSheetOpen(true)}
+            >
+              Estadisticas
+            </button>
+          ) : null}
           <button
             type="button"
             className="button button-ghost"
@@ -942,17 +1126,85 @@ function HomePage({
         </div>
       </header>
 
+      {uiToast ? <div className="app-toast">{uiToast}</div> : null}
+
       <section className="hero-panel">
         <div className="hero-panel-content">
           <p className="section-eyebrow">Resumen rapido</p>
           <h2>{currentGroup ? currentGroup.name : "Sin grupo activo"}</h2>
-          <p className="hero-panel-copy">
-            {isLoading
-              ? "Actualizando balance y movimientos..."
-              : currentGroup
-              ? balanceMessage
-              : "Crea o unete a un grupo para empezar a registrar movimientos."}
-          </p>
+          {currentGroup ? (
+            <div className="hero-balance-card">
+              <div className="hero-balance-head">
+                <span className="hero-balance-label">
+                  {isLoading
+                    ? "Actualizando balance"
+                    : isBalanced
+                    ? "Balance al dia"
+                    : hasCounterpart
+                    ? "Balance actual"
+                    : "Esperando otro integrante"}
+                </span>
+                <button
+                  type="button"
+                  className={`hero-balance-toggle ${
+                    isBalanceHidden ? "is-hidden" : ""
+                  }`}
+                  aria-label={
+                    isBalanceHidden ? "Mostrar saldo actual" : "Ocultar saldo actual"
+                  }
+                  onClick={() => setIsBalanceHidden((currentValue) => !currentValue)}
+                >
+                  <span className="hero-balance-eye" aria-hidden="true">
+                    <span className="hero-balance-eye-pupil" />
+                  </span>
+                </button>
+              </div>
+              <div className="hero-balance-body">
+                <p className="hero-balance-title">{heroBalanceSummary.title}</p>
+                {heroBalanceSummary.amount ? (
+                  <p
+                    className={`hero-balance-value ${
+                      isBalanceHidden ? "hero-balance-value-hidden" : ""
+                    }`}
+                  >
+                    {isBalanceHidden ? (
+                      heroBalanceSummary.amount
+                    ) : (
+                      <>
+                        <span className="hero-balance-currency">$</span>
+                        <span className="hero-balance-integer">
+                          {balanceAmountGroups.map((group, index) => (
+                            <span key={`${group}-${index}`} className="hero-balance-group">
+                              {group}
+                              {index < balanceAmountGroups.length - 1 ? (
+                                <span className="hero-balance-separator">.</span>
+                              ) : null}
+                            </span>
+                          ))}
+                        </span>
+                        <span className="hero-balance-decimal">
+                          ,{balanceAmountParts.decimalPart}
+                        </span>
+                      </>
+                    )}
+                  </p>
+                ) : null}
+              </div>
+              {!isLoading && !hasCounterpart ? (
+                <p className="hero-panel-copy">
+                  Cuando se sume otra persona, vas a ver aca como quedan las cuentas.
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="hero-empty-card">
+              <span className="hero-empty-badge">Empeza por un grupo</span>
+              <p className="hero-panel-copy">
+                Crea un grupo nuevo o unite con un codigo para empezar a registrar
+                gastos, transferencias y movimientos compartidos.
+              </p>
+            </div>
+          )}
           {currentMembers.length > 0 ? (
             <div className="member-pill-row">
               {currentMembers.map((member) => (
@@ -986,16 +1238,25 @@ function HomePage({
           className="group-panel-toggle"
           onClick={() => setGroupsExpanded((currentValue) => !currentValue)}
         >
-          <div>
+          <div className="group-panel-heading">
             <p className="section-eyebrow">Grupos</p>
             <h2>{currentGroup ? currentGroup.name : "Sin grupo activo"}</h2>
+            <p className="group-panel-summary">
+              {groups.length > 0
+                ? `${groups.length} ${groups.length === 1 ? "grupo disponible" : "grupos disponibles"}`
+                : "Crea o unite a tu primer grupo"}
+            </p>
           </div>
-          <span>{groupsExpanded ? "Ocultar" : "Mostrar"}</span>
+          <span className="group-panel-toggle-label">
+            {groupsExpanded ? "Ocultar" : "Mostrar"}
+          </span>
         </button>
 
         {groupsExpanded ? (
           <div className="group-panel-body">
-            {groupsLoading ? <p>Cargando grupos...</p> : null}
+            {groupsLoading ? (
+              <div className="group-panel-loading">Cargando grupos...</div>
+            ) : null}
 
             {groups.length > 0 ? (
               <>
@@ -1023,18 +1284,40 @@ function HomePage({
                     <div className="group-meta-grid">
                       <div className="group-meta-card">
                         <span>Codigo</span>
-                        <strong>{currentGroup.inviteCode}</strong>
+                        <strong className="group-meta-code">
+                          {currentGroup.inviteCode}
+                        </strong>
+                        <button
+                          type="button"
+                          className="button button-secondary group-meta-button"
+                          onClick={handleCopyInviteCode}
+                          disabled={copyingInvite}
+                        >
+                          {copyingInvite ? "Copiando..." : "Copiar codigo"}
+                        </button>
                       </div>
                       <div className="group-meta-card">
                         <span>Miembros</span>
-                        <strong>
-                          {(currentGroup.memberIds || [])
-                            .map(
-                              (memberId) =>
-                                currentGroup.memberNames?.[memberId] || "Integrante"
-                            )
-                            .join(", ")}
-                        </strong>
+                        <div className="group-members-list">
+                          {(currentGroup.memberIds || []).map((memberId) => (
+                            <div key={memberId} className="group-member-chip">
+                              <span>
+                                {currentGroup.memberNames?.[memberId] || "Integrante"}
+                              </span>
+                              {currentGroup.createdBy === user.uid && memberId !== user.uid ? (
+                                <button
+                                  type="button"
+                                  className="group-member-remove"
+                                  onClick={() => handleRemoveMember(memberId)}
+                                  disabled={removingMemberId === memberId}
+                                  aria-label={`Sacar a ${currentGroup.memberNames?.[memberId] || "integrante"} del grupo`}
+                                >
+                                  {removingMemberId === memberId ? "..." : "x"}
+                                </button>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                     {currentGroup.createdBy === user.uid ? (
@@ -1048,57 +1331,87 @@ function HomePage({
                           ? "Borrando grupo..."
                           : "Borrar grupo"}
                       </button>
-                    ) : null}
+                    ) : (
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={leavingGroup}
+                        onClick={handleLeaveGroup}
+                      >
+                        {leavingGroup ? "Saliendo..." : "Salir del grupo"}
+                      </button>
+                    )}
                   </>
                 ) : null}
               </>
             ) : (
-              <p className="group-panel-empty">
-                Todavia no perteneces a ningun grupo.
-              </p>
+              <div className="group-panel-empty">
+                <strong>Aun no tienes grupos</strong>
+                <p>
+                  Crea uno nuevo o usa un codigo de invitacion para empezar a
+                  compartir gastos.
+                </p>
+              </div>
             )}
 
-            <section className="group-actions">
-              <div>
-                <p className="section-eyebrow">Acciones del grupo</p>
-                <h3>Crear o unirse</h3>
-              </div>
+              <section className="group-actions">
+                <div className="group-actions-header">
+                  <p className="section-eyebrow">Acciones del grupo</p>
+                  <h3>Crear o unirse</h3>
+                  <p className="group-actions-copy">
+                    Crea un grupo nuevo o entra con un codigo para seguir todo desde el
+                    mismo espacio.
+                  </p>
+                </div>
 
-              <form
-                onSubmit={handleCreateGroup}
-                className="form"
-                style={{ marginBottom: "12px" }}
-              >
-                <input
-                  type="text"
-                  placeholder="Nombre del grupo"
-                  value={newGroupName}
-                  onChange={(event) => setNewGroupName(event.target.value)}
-                />
-                <button
-                  type="submit"
-                  className="button"
-                  disabled={groupActionLoading}
+                <form
+                  onSubmit={handleCreateGroup}
+                  className="form group-action-form"
                 >
-                  {groupActionLoading ? "Procesando..." : "Crear grupo"}
-                </button>
-              </form>
+                  <label className="form-field">
+                    <span className="form-field-label">Crear grupo</span>
+                    <input
+                      type="text"
+                      placeholder="Nombre del grupo"
+                      value={newGroupName}
+                      maxLength={GROUP_NAME_MAX_LENGTH}
+                      onChange={(event) =>
+                        setNewGroupName(event.target.value.slice(0, GROUP_NAME_MAX_LENGTH))
+                      }
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="button"
+                    disabled={creatingGroup || joiningGroup}
+                  >
+                    {creatingGroup ? "Procesando..." : "Crear grupo"}
+                  </button>
+                </form>
 
-              <form onSubmit={handleJoinGroup} className="form">
-                <input
-                  type="text"
-                  placeholder="Codigo de invitacion"
-                  value={joinCode}
-                  onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
-                />
-                <button
-                  type="submit"
-                  className="button button-secondary"
-                  disabled={groupActionLoading}
-                >
-                  {groupActionLoading ? "Procesando..." : "Unirme al grupo"}
-                </button>
-              </form>
+                <form onSubmit={handleJoinGroup} className="form group-action-form">
+                  <label className="form-field">
+                    <span className="form-field-label">Unirse con codigo</span>
+                    <input
+                      type="text"
+                      placeholder="Codigo de invitacion"
+                      value={joinCode}
+                      maxLength={INVITE_CODE_LENGTH}
+                      onChange={(event) =>
+                        setJoinCode(
+                          event.target.value.toUpperCase().slice(0, INVITE_CODE_LENGTH)
+                        )
+                      }
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="button button-secondary"
+                    disabled={creatingGroup || joiningGroup}
+                  >
+                    {joiningGroup ? "Procesando..." : "Unirme al grupo"}
+                  </button>
+                </form>
             </section>
           </div>
         ) : null}
@@ -1140,8 +1453,12 @@ function HomePage({
           />
         </div>
       ) : (
-        <section className="card">
-          <p>Crea o unete a un grupo para empezar a cargar movimientos.</p>
+        <section className="card empty-state empty-state-prominent">
+          <p className="empty-state-title">Tu historial va a aparecer aca</p>
+          <p className="empty-state-copy">
+            Apenas tengas un grupo activo, vas a poder anotar gastos, dar dinero y
+            seguir todo el movimiento desde un solo lugar.
+          </p>
         </section>
       )}
 
@@ -1192,6 +1509,15 @@ function HomePage({
         onSave={handleSaveProfile}
         onInstallApp={handleInstallApp}
         canInstallApp={Boolean(installPromptEvent)}
+      />
+
+      <StatisticsSheet
+        isOpen={statisticsSheetOpen}
+        onClose={() => setStatisticsSheetOpen(false)}
+        transactions={transactions}
+        members={currentMembers}
+        currentGroupName={currentGroup?.name || ""}
+        currentGroupCreatedAt={currentGroup?.createdAt || null}
       />
     </main>
   );

@@ -2,6 +2,8 @@ import { useState } from "react";
 import UserAvatar from "./UserAvatar";
 import { AVATAR_PRESETS } from "../utils/avatarPresets";
 
+const USERNAME_MAX_LENGTH = 24;
+
 export default function ProfileSheet({
   user,
   profile,
@@ -102,7 +104,10 @@ export default function ProfileSheet({
               type="text"
               placeholder="Tu nombre visible"
               value={username}
-              onChange={(event) => setUsername(event.target.value)}
+              maxLength={USERNAME_MAX_LENGTH}
+              onChange={(event) =>
+                setUsername(event.target.value.slice(0, USERNAME_MAX_LENGTH))
+              }
             />
 
             <button type="submit" className="button" disabled={isSaving}>

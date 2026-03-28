@@ -1,10 +1,21 @@
 import { useEffect, useState } from "react";
 import UserAvatar from "./UserAvatar";
+import { formatCurrencyAmount, splitCurrencyAmount } from "../utils/currency";
 
-function formatFriendlyDateTime(timestamp) {
+function getDateFromTimestamp(timestamp) {
   const date = timestamp?.toDate?.();
 
   if (!date || Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+function formatFriendlyDateTime(timestamp) {
+  const date = getDateFromTimestamp(timestamp);
+
+  if (!date) {
     return {
       dateLabel: "",
       timeLabel: "",
@@ -29,6 +40,67 @@ function formatFriendlyDateTime(timestamp) {
   };
 }
 
+function formatTimelineDayLabel(timestamp) {
+  const date = getDateFromTimestamp(timestamp);
+
+  if (!date) {
+    return "Sin fecha";
+  }
+
+  const transactionDay = new Date(date);
+  transactionDay.setHours(0, 0, 0, 0);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  if (transactionDay.getTime() === today.getTime()) {
+    return "Hoy";
+  }
+
+  if (transactionDay.getTime() === yesterday.getTime()) {
+    return "Ayer";
+  }
+
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function groupTransactionsByDay(transactions) {
+  const grouped = [];
+  let currentDayKey = "";
+
+  transactions.forEach((transaction) => {
+    const date = getDateFromTimestamp(transaction.createdAt);
+    const dayKey = date
+      ? `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+      : "sin-fecha";
+
+    if (dayKey !== currentDayKey) {
+      currentDayKey = dayKey;
+      grouped.push({
+        dayKey,
+        dayLabel: formatTimelineDayLabel(transaction.createdAt),
+        items: [transaction],
+      });
+      return;
+    }
+
+    grouped[grouped.length - 1].items.push(transaction);
+  });
+
+  return grouped;
+}
+
+function formatDayMovementCount(count) {
+  return count === 1 ? "1 movimiento" : `${count} movimientos`;
+}
+
 function formatAmountDisplay(amount) {
   const numericAmount = Number(amount);
 
@@ -37,20 +109,22 @@ function formatAmountDisplay(amount) {
       integerPart: "0",
       decimalPart: "00",
       compactIntegerStart: "0",
-      fullLabel: "$ 0.00",
+      fullLabel: "$ 0,00",
       shouldCompact: false,
     };
   }
 
-  const formattedAmount = numericAmount.toFixed(2);
-  const [integerPart, decimalPart = "00"] = formattedAmount.split(".");
+  const formattedAmount = formatCurrencyAmount(numericAmount);
+  const { integerPart, decimalPart } = splitCurrencyAmount(numericAmount);
   // Los montos muy largos se compactan para que no rompan la primera fila.
   const shouldCompact = formattedAmount.length > 13;
 
   return {
     integerPart,
     decimalPart,
-    compactIntegerStart: shouldCompact ? integerPart.slice(0, 8) : integerPart,
+    compactIntegerStart: shouldCompact
+      ? integerPart.replaceAll(".", "").slice(0, 8)
+      : integerPart,
     fullLabel: `$ ${formattedAmount}`,
     shouldCompact,
   };
@@ -97,14 +171,17 @@ function TransactionList({
           </div>
         </div>
         <div className="empty-state">
-          <p className="empty-state-title">Todavia no hay movimientos cargados.</p>
+          <p className="empty-state-title">Todavia no hay movimientos.</p>
           <p className="empty-state-copy">
-            Usa el boton inferior para registrar el primer movimiento del grupo.
+            Usa el boton inferior para registrar el primer gasto o un dar dinero
+            y empezar a llenar el historial del grupo.
           </p>
         </div>
       </section>
     );
   }
+
+  const groupedTransactions = groupTransactionsByDay(transactions);
 
   return (
     <section className="timeline">
@@ -115,197 +192,238 @@ function TransactionList({
         </div>
       </div>
 
-      {transactions.map((transaction) => {
-        const paidByName =
-          memberNames[transaction.paidByUserId] ||
-          transaction.paidBy ||
-          "Integrante";
-        const paidByPhoto = memberPhotos?.[transaction.paidByUserId] || "";
-        const paidByAvatarPreset =
-          memberAvatarPresets?.[transaction.paidByUserId] || "";
-        const createdByName =
-          memberNames[transaction.createdByUserId] || "Integrante";
-        const { dateLabel, timeLabel } = formatFriendlyDateTime(
-          transaction.createdAt
-        );
-        const canEdit =
-          Boolean(currentUserId) &&
-          Boolean(transaction.createdByUserId) &&
-          transaction.createdByUserId === currentUserId;
-        const canDelete = canEdit;
-        const hasActions = canEdit || canDelete;
-        const isMenuOpen = openMenuId === transaction.id;
-        const description = transaction.description?.trim() || "";
-        const categoryLabel = transaction.category?.trim() || "";
-        const hasLongDescription = description.length > 180;
-        const isDescriptionExpanded = Boolean(expandedDescriptionIds[transaction.id]);
-        const isAmountExpanded = Boolean(expandedAmountIds[transaction.id]);
-        // Los montos largos se compactan sin perder el valor completo al tocarlo.
-        const amountDisplay = formatAmountDisplay(transaction.amount);
+      <div className="timeline-groups">
+        {groupedTransactions.map((group) => (
+          <div key={group.dayKey} className="timeline-day-group">
+            <div className="timeline-day-divider">
+              <span>{group.dayLabel}</span>
+              <small>{formatDayMovementCount(group.items.length)}</small>
+            </div>
 
-        return (
-          <article
-            key={transaction.id}
-            className={`transaction ${
-              hasLongDescription && isDescriptionExpanded
-                ? "transaction-expanded"
-                : ""
-            }`}
-            onClick={() => {
-              if (!hasLongDescription) {
-                return;
-              }
+            <div className="timeline-day-items">
+              {group.items.map((transaction) => {
+                const paidByName =
+                  memberNames[transaction.paidByUserId] ||
+                  transaction.paidBy ||
+                  "Integrante";
+                const paidByPhoto = memberPhotos?.[transaction.paidByUserId] || "";
+                const paidByAvatarPreset =
+                  memberAvatarPresets?.[transaction.paidByUserId] || "";
+                const createdByName =
+                  memberNames[transaction.createdByUserId] || "Integrante";
+                const { dateLabel, timeLabel } = formatFriendlyDateTime(
+                  transaction.createdAt
+                );
+                const canEdit =
+                  Boolean(currentUserId) &&
+                  Boolean(transaction.createdByUserId) &&
+                  transaction.createdByUserId === currentUserId;
+                const canDelete = canEdit;
+                const hasActions = canEdit || canDelete;
+                const isMenuOpen = openMenuId === transaction.id;
+                const description = transaction.description?.trim() || "";
+                const categoryLabel = transaction.category?.trim() || "";
+                const hasLongDescription = description.length > 180;
+                const isDescriptionExpanded = Boolean(
+                  expandedDescriptionIds[transaction.id]
+                );
+                const isAmountExpanded = Boolean(
+                  expandedAmountIds[transaction.id]
+                );
+                const amountDisplay = formatAmountDisplay(transaction.amount);
+                const transactionTypeClass =
+                  transaction.type === "SETTLEMENT"
+                    ? "transaction-settlement"
+                    : "transaction-shared";
 
-              setExpandedDescriptionIds((currentValue) => ({
-                ...currentValue,
-                [transaction.id]: !currentValue[transaction.id],
-              }));
-            }}
-          >
-            {hasActions ? (
-              <div className="transaction-side">
-                <div className="transaction-actions-menu">
-                  <button
-                    type="button"
-                    className="transaction-actions-trigger"
-                    aria-label="Abrir acciones del movimiento"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setOpenMenuId((currentValue) =>
-                        currentValue === transaction.id ? "" : transaction.id
-                      );
+                return (
+                  <article
+                    key={transaction.id}
+                    className={`transaction ${transactionTypeClass} ${
+                      isMenuOpen ? "transaction-menu-open" : ""
+                    } ${
+                      hasLongDescription && isDescriptionExpanded
+                        ? "transaction-expanded"
+                        : ""
+                    }`}
+                    onClick={() => {
+                      if (!hasLongDescription) {
+                        return;
+                      }
+
+                      setExpandedDescriptionIds((currentValue) => ({
+                        ...currentValue,
+                        [transaction.id]: !currentValue[transaction.id],
+                      }));
                     }}
                   >
-                    <span className="transaction-actions-dots" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                  </button>
+                    {hasActions ? (
+                      <div className="transaction-side">
+                        <div className="transaction-actions-menu">
+                          <button
+                            type="button"
+                            className="transaction-actions-trigger"
+                            aria-label="Abrir acciones del movimiento"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpenMenuId((currentValue) =>
+                                currentValue === transaction.id ? "" : transaction.id
+                              );
+                            }}
+                          >
+                            <span
+                              className="transaction-actions-dots"
+                              aria-hidden="true"
+                            >
+                              <span />
+                              <span />
+                              <span />
+                            </span>
+                          </button>
 
-                  {isMenuOpen ? (
-                    <div
-                      className="transaction-actions-popover"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          className="transaction-action-item"
-                          onClick={() => {
-                            setOpenMenuId("");
-                            onEditTransaction(transaction);
-                          }}
-                        >
-                          Editar
-                        </button>
-                      ) : null}
-                      {canDelete ? (
-                        <button
-                          type="button"
-                          className="transaction-action-item transaction-action-item-danger"
-                          disabled={deletingId === transaction.id}
-                          onClick={() => {
-                            setOpenMenuId("");
-                            onDeleteTransaction(transaction);
-                          }}
-                        >
-                          {deletingId === transaction.id ? "Borrando..." : "Borrar"}
-                        </button>
-                      ) : null}
+                          {isMenuOpen ? (
+                            <div
+                              className="transaction-actions-popover"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {canEdit ? (
+                                <button
+                                  type="button"
+                                  className="transaction-action-item"
+                                  onClick={() => {
+                                    setOpenMenuId("");
+                                    onEditTransaction(transaction);
+                                  }}
+                                >
+                                  Editar
+                                </button>
+                              ) : null}
+                              {canDelete ? (
+                                <button
+                                  type="button"
+                                  className="transaction-action-item transaction-action-item-danger"
+                                  disabled={deletingId === transaction.id}
+                                  onClick={() => {
+                                    setOpenMenuId("");
+                                    onDeleteTransaction(transaction);
+                                  }}
+                                >
+                                  {deletingId === transaction.id
+                                    ? "Borrando..."
+                                    : "Borrar"}
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="transaction-top">
+                      <div className="transaction-main">
+                        <div className="transaction-head-row">
+                          <div className="transaction-person">
+                            <UserAvatar
+                              photoURL={paidByAvatarPreset ? "" : paidByPhoto}
+                              avatarPreset={paidByAvatarPreset}
+                              alt={`Avatar de ${paidByName}`}
+                              className="transaction-avatar"
+                              fallbackClassName="transaction-avatar-fallback"
+                            />
+                            <button
+                              type="button"
+                              className={`transaction-amount ${
+                                amountDisplay.shouldCompact && !isAmountExpanded
+                                  ? "transaction-amount-compact"
+                                  : ""
+                              } ${
+                                amountDisplay.shouldCompact && isAmountExpanded
+                                  ? "transaction-amount-expanded-long"
+                                  : ""
+                              }`}
+                              title={`Monto completo: ${amountDisplay.fullLabel}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (!amountDisplay.shouldCompact) {
+                                  return;
+                                }
+
+                                setExpandedAmountIds((currentValue) => ({
+                                  ...currentValue,
+                                  [transaction.id]: !currentValue[transaction.id],
+                                }));
+                              }}
+                            >
+                              {amountDisplay.shouldCompact && !isAmountExpanded ? (
+                                <>
+                                  <span className="transaction-currency">$</span>
+                                  <span className="transaction-amount-integer">
+                                    {amountDisplay.compactIntegerStart}
+                                  </span>
+                                  <span className="transaction-amount-ellipsis">
+                                    ...
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="transaction-currency">$</span>
+                                  <span className="transaction-amount-integer">
+                                    {amountDisplay.integerPart}
+                                  </span>
+                                  <span className="transaction-amount-decimal">
+                                    ,{amountDisplay.decimalPart}
+                                  </span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="transaction-meta-row">
+                          <p
+                            className={`transaction-bottom transaction-primary-meta transaction-type-pill ${
+                              transaction.type === "SETTLEMENT"
+                                ? "transaction-type-pill-settlement"
+                                : "transaction-type-pill-shared"
+                            }`}
+                          >
+                            {getTypeLabel(transaction.type)}
+                          </p>
+                          <p className="transaction-bottom">
+                            Cargado por: {createdByName}
+                          </p>
+                          {dateLabel ? (
+                            <p className="transaction-bottom">
+                              {dateLabel} - {timeLabel}
+                            </p>
+                          ) : null}
+                          {categoryLabel ? (
+                            <span className="transaction-tag">{categoryLabel}</span>
+                          ) : null}
+                        </div>
+
+                        {description ? (
+                          <div className="transaction-description-block">
+                            <p
+                              className={`transaction-description ${
+                                hasLongDescription && !isDescriptionExpanded
+                                  ? "transaction-description-collapsed"
+                                  : ""
+                              }`}
+                            >
+                              {description}
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="transaction-top">
-              <div className="transaction-main">
-                <div className="transaction-head-row">
-                  <div className="transaction-person">
-                    <UserAvatar
-                      photoURL={paidByAvatarPreset ? "" : paidByPhoto}
-                      avatarPreset={paidByAvatarPreset}
-                      alt={`Avatar de ${paidByName}`}
-                      className="transaction-avatar"
-                      fallbackClassName="transaction-avatar-fallback"
-                    />
-                    <button
-                      type="button"
-                      className={`transaction-amount ${
-                        amountDisplay.shouldCompact && !isAmountExpanded
-                          ? "transaction-amount-compact"
-                          : ""
-                      }`}
-                      title={`Monto completo: ${amountDisplay.fullLabel}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (!amountDisplay.shouldCompact) {
-                          return;
-                        }
-
-                        setExpandedAmountIds((currentValue) => ({
-                          ...currentValue,
-                          [transaction.id]: !currentValue[transaction.id],
-                        }));
-                      }}
-                    >
-                      {amountDisplay.shouldCompact && !isAmountExpanded ? (
-                        <>
-                          <span className="transaction-currency">$</span>
-                          <span className="transaction-amount-integer">
-                            {amountDisplay.compactIntegerStart}
-                          </span>
-                          <span className="transaction-amount-ellipsis">...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="transaction-currency">$</span>
-                          <span className="transaction-amount-integer">
-                            {amountDisplay.integerPart}
-                          </span>
-                          <span className="transaction-amount-decimal">
-                            .{amountDisplay.decimalPart}
-                          </span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="transaction-meta-row">
-                  <p className="transaction-bottom transaction-primary-meta">
-                    {getTypeLabel(transaction.type)}
-                  </p>
-                  <p className="transaction-bottom">Cargado por: {createdByName}</p>
-                  {dateLabel ? (
-                    <p className="transaction-bottom">
-                      {dateLabel} - {timeLabel}
-                    </p>
-                  ) : null}
-                  {categoryLabel ? (
-                    <span className="transaction-tag">{categoryLabel}</span>
-                  ) : null}
-                </div>
-
-                {description ? (
-                  <div className="transaction-description-block">
-                    <p
-                      className={`transaction-description ${
-                        hasLongDescription && !isDescriptionExpanded
-                          ? "transaction-description-collapsed"
-                          : ""
-                      }`}
-                    >
-                      {description}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
+                  </article>
+                );
+              })}
             </div>
-          </article>
-        );
-      })}
+          </div>
+        ))}
+      </div>
 
       {hasMore ? (
         <button

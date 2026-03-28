@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import categories from "../data/categories";
 
 const AMOUNT_INPUT_PATTERN = /^\d{0,9}([.,]\d{0,2})?$/;
+const DESCRIPTION_MAX_LENGTH = 140;
 
 function getDefaultPaidBy(members, currentUserId) {
   if (currentUserId && members.some((member) => member.uid === currentUserId)) {
@@ -151,31 +152,39 @@ function TransactionForm({
             {initialValues ? "Movimiento existente" : "Nuevo movimiento"}
           </p>
           <h2>{initialValues ? "Editar movimiento" : "Agregar movimiento"}</h2>
+          <p className="composer-sheet-copy">
+            {initialValues
+              ? "Ajusta el movimiento y guarda los cambios cuando quede listo."
+              : "Carga un gasto o un dar dinero sin salir del grupo actual."}
+          </p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="form">
-        <input
-          type="text"
-          inputMode="decimal"
-          placeholder="Monto"
-          value={amount}
-          onChange={(event) => {
-            const nextValue = normalizeAmountInput(event.target.value);
+        <label className="form-field">
+          <span className="form-field-label">Monto</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="0,00"
+            value={amount}
+            onChange={(event) => {
+              const nextValue = normalizeAmountInput(event.target.value);
 
-            if (nextValue !== "" && !AMOUNT_INPUT_PATTERN.test(nextValue)) {
-              return;
-            }
+              if (nextValue !== "" && !AMOUNT_INPUT_PATTERN.test(nextValue)) {
+                return;
+              }
 
-            setFormState((currentState) => ({
-              ...currentState,
-              amount: nextValue,
-            }));
-            setShowAmountHint(false);
-            setAmountHintPulse(false);
-          }}
-          autoFocus
-        />
+              setFormState((currentState) => ({
+                ...currentState,
+                amount: nextValue,
+              }));
+              setShowAmountHint(false);
+              setAmountHintPulse(false);
+            }}
+            autoFocus
+          />
+        </label>
 
         {showAmountHint && amountError ? (
           <p
@@ -187,58 +196,66 @@ function TransactionForm({
           </p>
         ) : null}
 
-        <input
-          placeholder="Descripcion"
-          value={description}
-          onChange={(event) =>
-            setFormState((currentState) => ({
-              ...currentState,
-              description: event.target.value,
-            }))
-          }
-        />
+        <label className="form-field">
+          <span className="form-field-label">Descripcion</span>
+          <input
+            placeholder="Ej: super, nafta, transferencia"
+            value={description}
+            maxLength={DESCRIPTION_MAX_LENGTH}
+            onChange={(event) =>
+              setFormState((currentState) => ({
+                ...currentState,
+                description: event.target.value.slice(0, DESCRIPTION_MAX_LENGTH),
+              }))
+            }
+          />
+        </label>
 
-        <select
-          value={type}
-          onChange={(event) => {
-            setFormState((currentState) => ({
-              ...currentState,
-              type: event.target.value,
-              category:
-                event.target.value === "SETTLEMENT"
-                  ? ""
-                  : currentState.category,
-            }));
-            setShowCategoryHint(false);
-            setCategoryHintPulse(false);
-          }}
-        >
-          <option value="SHARED">Compartido</option>
-          <option value="SETTLEMENT">Dar dinero</option>
-        </select>
+        <label className="form-field">
+          <span className="form-field-label">Tipo</span>
+          <select
+            value={type}
+            onChange={(event) => {
+              setFormState((currentState) => ({
+                ...currentState,
+                type: event.target.value,
+                category:
+                  event.target.value === "SETTLEMENT"
+                    ? ""
+                    : currentState.category,
+              }));
+              setShowCategoryHint(false);
+              setCategoryHintPulse(false);
+            }}
+          >
+            <option value="SHARED">Compartido</option>
+            <option value="SETTLEMENT">Dar dinero</option>
+          </select>
+        </label>
 
         {type === "SHARED" ? (
           <>
-            <select
-              value={category}
-              onChange={(event) =>
-                {
+            <label className="form-field">
+              <span className="form-field-label">Categoria</span>
+              <select
+                value={category}
+                onChange={(event) => {
                   setFormState((currentState) => ({
                     ...currentState,
                     category: event.target.value,
                   }));
                   setShowCategoryHint(false);
                   setCategoryHintPulse(false);
-                }
-              }
-            >
-              <option value="">Selecciona una categoria</option>
-              {categories.map((categoryOption) => (
-                <option key={categoryOption} value={categoryOption}>
-                  {categoryOption}
-                </option>
-              ))}
-            </select>
+                }}
+              >
+                <option value="">Selecciona una categoria</option>
+                {categories.map((categoryOption) => (
+                  <option key={categoryOption} value={categoryOption}>
+                    {categoryOption}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             {showCategoryHint && categoryError ? (
               <p
@@ -252,49 +269,55 @@ function TransactionForm({
           </>
         ) : null}
 
-        <select
-          value={paidByUserId}
-          onChange={(event) =>
-            setFormState((currentState) => ({
-              ...currentState,
-              paidByUserId: event.target.value,
-            }))
-          }
-        >
-          {members.map((member) => (
-            <option key={member.uid} value={member.uid}>
-              {member.username}
-            </option>
-          ))}
-        </select>
-
-        <button
-          type="submit"
-          className="button"
-          disabled={!isFormValid || isSaving}
-          style={{
-            opacity: isSaving ? 0.6 : 1,
-            cursor: isSaving ? "not-allowed" : "pointer",
-            marginBottom: initialValues ? "8px" : 0,
-          }}
-        >
-          {isSaving
-            ? "Guardando..."
-            : initialValues
-              ? "Guardar cambios"
-              : "Guardar"}
-        </button>
-
-        {initialValues ? (
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={onCancelEdit}
-            disabled={isSaving}
+        <label className="form-field">
+          <span className="form-field-label">
+            {type === "SETTLEMENT" ? "Quien da el dinero" : "Quien pago"}
+          </span>
+          <select
+            value={paidByUserId}
+            onChange={(event) =>
+              setFormState((currentState) => ({
+                ...currentState,
+                paidByUserId: event.target.value,
+              }))
+            }
           >
-            Cancelar edicion
+            {members.map((member) => (
+              <option key={member.uid} value={member.uid}>
+                {member.username}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="composer-sheet-actions">
+          <button
+            type="submit"
+            className="button"
+            disabled={!isFormValid || isSaving}
+            style={{
+              opacity: isSaving ? 0.6 : 1,
+              cursor: isSaving ? "not-allowed" : "pointer",
+            }}
+          >
+            {isSaving
+              ? "Guardando..."
+              : initialValues
+                ? "Guardar cambios"
+                : "Guardar"}
           </button>
-        ) : null}
+
+          {initialValues ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={onCancelEdit}
+              disabled={isSaving}
+            >
+              Cancelar edicion
+            </button>
+          ) : null}
+        </div>
       </form>
     </section>
   );

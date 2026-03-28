@@ -1,12 +1,15 @@
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { auth } from "../firebase";
+import { signInWithGoogle } from "../utils/auth";
 
-function Login() {
+function Login({ onLogin }) {
   async function handleLogin() {
-    const provider = new GoogleAuthProvider();
+    if (onLogin) {
+      await onLogin();
+      return;
+    }
 
     try {
-      await signInWithPopup(auth, provider);
+      await signInWithGoogle(auth);
     } catch (error) {
       console.error("Error al iniciar sesion:", error);
     }
@@ -15,11 +18,11 @@ function Login() {
   return (
     <main className="auth-screen">
       <section className="auth-card">
-        <div className="auth-badge">MVP compartido</div>
-        <h1 className="auth-title">Gastos compartidos</h1>
+        <div className="auth-badge">Miticuenta</div>
+        <h1 className="auth-title">Miticuenta</h1>
         <p className="auth-copy">
-          Organiza gastos por grupo, registra movimientos rapido y manten el
-          saldo claro entre ambos.
+          Organiza grupos, registra movimientos rapido y manten todo ordenado
+          en un solo lugar.
         </p>
         <button className="button auth-google-button" onClick={handleLogin}>
           <span className="auth-google-mark">G</span>
