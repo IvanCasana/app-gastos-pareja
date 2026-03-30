@@ -112,6 +112,7 @@ export function getHeroBalanceSummary({
   isBalanceHidden,
   hasCounterpart,
   balance,
+  currentMemberName,
   otherMemberName,
 }) {
   if (!currentGroup) {
@@ -144,7 +145,7 @@ export function getHeroBalanceSummary({
 
   if (balance > 0) {
     return {
-      title: `Saldo a tu favor de ${otherMemberName}:`,
+      title: `Saldo a favor de ${currentMemberName}:`,
       amount: `$${formatCurrencyAmount(Math.abs(balance))}`,
     };
   }

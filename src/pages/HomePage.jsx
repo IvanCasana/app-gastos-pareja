@@ -390,6 +390,10 @@ function HomePage({
 
   const otherMemberName =
     currentMembers.find((member) => member.uid !== user?.uid)?.username || "";
+  const currentMemberName =
+    currentMembers.find((member) => member.uid === user?.uid)?.username ||
+    profile?.username ||
+    "";
   // La vista actual y el algoritmo de balance asumen grupos de 2 miembros.
   const balance = calculateBalance(transactions, currentMembers, user?.uid);
   const visibleTransactions = transactions.slice(0, visibleTransactionsCount);
@@ -431,7 +435,7 @@ function HomePage({
 
     if (balance > 0) {
       return {
-        title: `Saldo a tu favor de ${otherMemberName}:`,
+        title: `Saldo a favor de ${currentMemberName}:`,
         amount: balanceAmountLabel,
       };
     }

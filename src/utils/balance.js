@@ -1,38 +1,48 @@
 import { formatCurrencyAmount } from "./currency";
 
+function toAmountInCents(amount) {
+  const numericAmount = Number(amount);
+
+  if (Number.isNaN(numericAmount)) {
+    return 0;
+  }
+
+  return Math.round(numericAmount * 100);
+}
+
 export function calculateBalance(transactions, members, referenceUserId) {
   if (!referenceUserId || !Array.isArray(members) || members.length !== 2) {
     return 0;
   }
 
-  let balance = 0;
+  let balanceInHalfCents = 0;
 
   for (const transaction of transactions) {
-    const amount = Number(transaction.amount);
+    const amountInCents = toAmountInCents(transaction.amount);
     const paidByUserId = transaction.paidByUserId || transaction.paidBy;
 
-    if (!amount || Number.isNaN(amount) || !paidByUserId) continue;
+    if (!amountInCents || !paidByUserId) continue;
 
     if (transaction.type === "SHARED") {
-      // En un gasto compartido, quien pago queda a favor por la mitad.
+      // Usamos medios centavos para evitar errores de coma flotante.
       if (paidByUserId === referenceUserId) {
-        balance += amount / 2;
+        balanceInHalfCents += amountInCents;
       } else {
-        balance -= amount / 2;
+        balanceInHalfCents -= amountInCents;
       }
     }
 
     if (transaction.type === "SETTLEMENT") {
       // Dar dinero mueve el saldo completo entre una persona y la otra.
       if (paidByUserId === referenceUserId) {
-        balance += amount;
+        balanceInHalfCents += amountInCents * 2;
       } else {
-        balance -= amount;
+        balanceInHalfCents -= amountInCents * 2;
       }
     }
   }
 
-  return Math.round(balance * 100) / 100;
+  return Math.round(balanceInHalfCents) / 200;
 }
 
 export function getBalanceMessage(balance, otherUserName) {
