@@ -25,6 +25,7 @@ import {
   createInviteCode,
   GROUP_NAME_MAX_LENGTH,
   INVITE_CODE_LENGTH,
+  MAX_GROUP_MEMBERS,
   PAGE_SIZE,
   playLogoSoundSequence,
   sortTransactionsByCreatedAt,
@@ -34,6 +35,7 @@ import { db, auth } from "../firebase";
 const TransactionForm = lazy(() => import("../components/TransactionForm"));
 const ProfileSheet = lazy(() => import("../components/ProfileSheet"));
 const StatisticsSheet = lazy(() => import("../components/StatisticsSheet"));
+const GroupSheet = lazy(() => import("../components/GroupSheet"));
 const Login = lazy(() => import("../components/login"));
 const CompleteProfile = lazy(() => import("../components/CompleteProfile"));
 
@@ -67,7 +69,7 @@ function HomePage({
   const [leavingGroup, setLeavingGroup] = useState(false);
   const [copyingInvite, setCopyingInvite] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState("");
-  const [groupsExpanded, setGroupsExpanded] = useState(false);
+  const [groupSheetOpen, setGroupSheetOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
   const [statisticsSheetOpen, setStatisticsSheetOpen] = useState(false);
@@ -245,6 +247,11 @@ function HomePage({
     null;
   const currentGroup =
     groups.find((group) => group.id === currentGroupId) || groups[0] || null;
+  const profileGroupIds = Array.isArray(profile?.groupIds) ? profile.groupIds : [];
+  const canAccessCurrentGroup =
+    Boolean(user?.uid && currentGroup?.id) &&
+    currentGroup.memberIds?.includes(user.uid) &&
+    profileGroupIds.includes(currentGroup.id);
 
   const currentMembers = useMemo(() => {
     if (!currentGroup) return [];
@@ -287,7 +294,7 @@ function HomePage({
   }, [currentMembers]);
 
   useEffect(() => {
-    if (!user || !profile || !currentGroup?.id) {
+    if (!user || !profile || !currentGroup?.id || !canAccessCurrentGroup) {
       setTransactions([]);
       setTransactionsError("");
       setIsLoading(false);
@@ -325,7 +332,7 @@ function HomePage({
     );
 
     return () => unsubscribeFirestore();
-  }, [currentGroup?.id, profile, transactionsCollection, user]);
+  }, [canAccessCurrentGroup, currentGroup?.id, profile, transactionsCollection, user]);
 
   useEffect(() => {
     setVisibleTransactionsCount(PAGE_SIZE);
@@ -353,7 +360,7 @@ function HomePage({
 
   useEffect(() => {
     async function loadMemberProfiles() {
-      if (!currentGroup?.memberIds?.length) {
+      if (!currentGroup?.memberIds?.length || !canAccessCurrentGroup) {
         setMemberProfiles({});
         return;
       }
@@ -386,7 +393,7 @@ function HomePage({
     }
 
     loadMemberProfiles();
-  }, [currentGroup?.id, currentGroup?.memberIds]);
+  }, [canAccessCurrentGroup, currentGroup?.id, currentGroup?.memberIds]);
 
   const otherMemberName =
     currentMembers.find((member) => member.uid !== user?.uid)?.username || "";
@@ -501,7 +508,7 @@ function HomePage({
           [user.uid]: profile.username,
         },
         inviteCode: createInviteCode(),
-        maxMembers: 2,
+        maxMembers: MAX_GROUP_MEMBERS,
         status: "active",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -513,7 +520,7 @@ function HomePage({
       });
 
       setNewGroupName("");
-      setGroupsExpanded(false);
+      setGroupSheetOpen(false);
       setUiToast("Grupo creado");
     } catch (error) {
       console.error("Error al crear grupo:", error);
@@ -560,12 +567,16 @@ function HomePage({
       const memberIds = Array.isArray(groupData.memberIds)
         ? groupData.memberIds
         : [];
+      const maxMembers = Math.min(
+        Number(groupData.maxMembers) || MAX_GROUP_MEMBERS,
+        MAX_GROUP_MEMBERS
+      );
 
       if (
         !memberIds.includes(user.uid) &&
-        memberIds.length >= (groupData.maxMembers || 2)
+        memberIds.length >= maxMembers
       ) {
-        setGroupError("Ese grupo ya esta completo.");
+        setGroupError("Ese grupo ya alcanzo el limite de 2 personas.");
         return;
       }
 
@@ -594,7 +605,7 @@ function HomePage({
       });
 
       setJoinCode("");
-      setGroupsExpanded(false);
+      setGroupSheetOpen(false);
       setUiToast("Te uniste al grupo");
     } catch (error) {
       console.error("Error al unirse al grupo:", error);
@@ -878,8 +889,9 @@ function HomePage({
       const batch = writeBatch(db);
       const groupIdToDelete = currentGroup.id;
 
-      // Borrar un grupo implica borrar sus movimientos y sacar ese groupId
-      // de cada miembro para no dejar perfiles apuntando a un grupo inexistente.
+      // Borrar el grupo y sus movimientos debe funcionar con las reglas actuales.
+      // La sincronizacion posterior de `groupIds` y `activeGroupId` de cada perfil
+      // la resuelve el efecto `syncProfileGroups` cuando cada integrante vuelve a cargar.
       batch.delete(doc(db, "groups", groupIdToDelete));
 
       const transactionSnapshot = await getDocs(
@@ -888,35 +900,6 @@ function HomePage({
 
       transactionSnapshot.docs.forEach((transactionDoc) => {
         batch.delete(doc(db, "transactions", transactionDoc.id));
-      });
-
-      const memberIds = Array.isArray(currentGroup.memberIds)
-        ? currentGroup.memberIds
-        : [];
-
-      const userSnapshots = await Promise.all(
-        memberIds.map((memberId) => getDoc(doc(db, "users", memberId)))
-      );
-
-      userSnapshots.forEach((userSnapshot) => {
-        if (!userSnapshot.exists()) {
-          return;
-        }
-
-        const memberData = userSnapshot.data();
-        const nextGroupIds = (memberData.groupIds || []).filter(
-          (groupId) => groupId !== groupIdToDelete
-        );
-        const nextActiveGroupId =
-          memberData.activeGroupId === groupIdToDelete
-            ? nextGroupIds[0] || null
-            : memberData.activeGroupId || null;
-
-        batch.update(doc(db, "users", userSnapshot.id), {
-          groupIds: nextGroupIds,
-          activeGroupId: nextActiveGroupId,
-          updatedAt: serverTimestamp(),
-        });
       });
 
       await batch.commit();
@@ -1131,6 +1114,15 @@ function HomePage({
           </div>
         </div>
         <div className="header-actions">
+          <button
+            type="button"
+            className={`button button-ghost ${
+              groupSheetOpen ? "header-action-active" : ""
+            }`}
+            onClick={() => setGroupSheetOpen(true)}
+          >
+            Grupo
+          </button>
           {currentGroup ? (
             <button
               type="button"
@@ -1169,7 +1161,28 @@ function HomePage({
           <p className="section-eyebrow">Resumen rapido</p>
           <h2>{currentGroup ? currentGroup.name : "Sin grupo activo"}</h2>
           {currentGroup ? (
-            <div className="hero-balance-card">
+            <div
+              className={`hero-balance-card ${
+                !hasCounterpart && !isLoading ? "hero-balance-card-actionable" : ""
+              }`}
+              onClick={
+                !hasCounterpart && !isLoading
+                  ? () => setGroupSheetOpen(true)
+                  : undefined
+              }
+              role={!hasCounterpart && !isLoading ? "button" : undefined}
+              tabIndex={!hasCounterpart && !isLoading ? 0 : undefined}
+              onKeyDown={
+                !hasCounterpart && !isLoading
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setGroupSheetOpen(true);
+                      }
+                    }
+                  : undefined
+              }
+            >
               <div className="hero-balance-head">
                 <span className="hero-balance-label">
                   {isLoading
@@ -1188,7 +1201,10 @@ function HomePage({
                   aria-label={
                     isBalanceHidden ? "Mostrar saldo actual" : "Ocultar saldo actual"
                   }
-                  onClick={() => setIsBalanceHidden((currentValue) => !currentValue)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setIsBalanceHidden((currentValue) => !currentValue);
+                  }}
                 >
                   <span className="hero-balance-eye" aria-hidden="true">
                     <span className="hero-balance-eye-pupil" />
@@ -1233,13 +1249,17 @@ function HomePage({
               ) : null}
             </div>
           ) : (
-            <div className="hero-empty-card">
+            <button
+              type="button"
+              className="hero-empty-card"
+              onClick={() => setGroupSheetOpen(true)}
+            >
               <span className="hero-empty-badge">Empeza por un grupo</span>
               <p className="hero-panel-copy">
                 Crea un grupo nuevo o unite con un codigo para empezar a registrar
                 gastos, transferencias y movimientos compartidos.
               </p>
-            </div>
+            </button>
           )}
           {currentMembers.length > 0 ? (
             <div className="member-pill-row">
@@ -1266,193 +1286,6 @@ function HomePage({
             + Agregar movimiento
           </button>
         ) : null}
-      </section>
-
-      <section className="card group-panel">
-        <button
-          type="button"
-          className="group-panel-toggle"
-          onClick={() => setGroupsExpanded((currentValue) => !currentValue)}
-        >
-          <div className="group-panel-heading">
-            <p className="section-eyebrow">Grupos</p>
-            <h2>{currentGroup ? currentGroup.name : "Sin grupo activo"}</h2>
-            <p className="group-panel-summary">
-              {groups.length > 0
-                ? `${groups.length} ${groups.length === 1 ? "grupo disponible" : "grupos disponibles"}`
-                : "Crea o unite a tu primer grupo"}
-            </p>
-          </div>
-          <span className="group-panel-toggle-label">
-            {groupsExpanded ? "Ocultar" : "Mostrar"}
-          </span>
-        </button>
-
-        {groupsExpanded ? (
-          <div className="group-panel-body">
-            {groupsLoading ? (
-              <div className="group-panel-loading">Cargando grupos...</div>
-            ) : null}
-
-            {groups.length > 0 ? (
-              <>
-                <p className="group-select-label">Selecciona grupo</p>
-                <div className="group-select-wrap">
-                  <select
-                    value={currentGroup?.id || ""}
-                    onChange={(event) => handleChangeGroup(event.target.value)}
-                  >
-                    {!currentGroup ? (
-                      <option value="" disabled>
-                        Selecciona grupo
-                      </option>
-                    ) : null}
-                    {groups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {currentGroup ? (
-                  <>
-                    <div className="group-meta-grid">
-                      <div className="group-meta-card">
-                        <span>Codigo</span>
-                        <strong className="group-meta-code">
-                          {currentGroup.inviteCode}
-                        </strong>
-                        <button
-                          type="button"
-                          className="button button-secondary group-meta-button"
-                          onClick={handleCopyInviteCode}
-                          disabled={copyingInvite}
-                        >
-                          {copyingInvite ? "Copiando..." : "Copiar codigo"}
-                        </button>
-                      </div>
-                      <div className="group-meta-card">
-                        <span>Miembros</span>
-                        <div className="group-members-list">
-                          {(currentGroup.memberIds || []).map((memberId) => (
-                            <div key={memberId} className="group-member-chip">
-                              <span>
-                                {currentGroup.memberNames?.[memberId] || "Integrante"}
-                              </span>
-                              {currentGroup.createdBy === user.uid && memberId !== user.uid ? (
-                                <button
-                                  type="button"
-                                  className="group-member-remove"
-                                  onClick={() => handleRemoveMember(memberId)}
-                                  disabled={removingMemberId === memberId}
-                                  aria-label={`Sacar a ${currentGroup.memberNames?.[memberId] || "integrante"} del grupo`}
-                                >
-                                  {removingMemberId === memberId ? "..." : "x"}
-                                </button>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    {currentGroup.createdBy === user.uid ? (
-                      <button
-                        type="button"
-                        className="button button-danger"
-                        disabled={deletingGroupId === currentGroup.id}
-                        onClick={handleDeleteGroup}
-                      >
-                        {deletingGroupId === currentGroup.id
-                          ? "Borrando grupo..."
-                          : "Borrar grupo"}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        disabled={leavingGroup}
-                        onClick={handleLeaveGroup}
-                      >
-                        {leavingGroup ? "Saliendo..." : "Salir del grupo"}
-                      </button>
-                    )}
-                  </>
-                ) : null}
-              </>
-            ) : (
-              <div className="group-panel-empty">
-                <strong>Aun no tienes grupos</strong>
-                <p>
-                  Crea uno nuevo o usa un codigo de invitacion para empezar a
-                  compartir gastos.
-                </p>
-              </div>
-            )}
-
-              <section className="group-actions">
-                <div className="group-actions-header">
-                  <p className="section-eyebrow">Acciones del grupo</p>
-                  <h3>Crear o unirse</h3>
-                  <p className="group-actions-copy">
-                    Crea un grupo nuevo o entra con un codigo para seguir todo desde el
-                    mismo espacio.
-                  </p>
-                </div>
-
-                <form
-                  onSubmit={handleCreateGroup}
-                  className="form group-action-form"
-                >
-                  <label className="form-field">
-                    <span className="form-field-label">Crear grupo</span>
-                    <input
-                      type="text"
-                      placeholder="Nombre del grupo"
-                      value={newGroupName}
-                      maxLength={GROUP_NAME_MAX_LENGTH}
-                      onChange={(event) =>
-                        setNewGroupName(event.target.value.slice(0, GROUP_NAME_MAX_LENGTH))
-                      }
-                    />
-                  </label>
-                  <button
-                    type="submit"
-                    className="button"
-                    disabled={creatingGroup || joiningGroup}
-                  >
-                    {creatingGroup ? "Procesando..." : "Crear grupo"}
-                  </button>
-                </form>
-
-                <form onSubmit={handleJoinGroup} className="form group-action-form">
-                  <label className="form-field">
-                    <span className="form-field-label">Unirse con codigo</span>
-                    <input
-                      type="text"
-                      placeholder="Codigo de invitacion"
-                      value={joinCode}
-                      maxLength={INVITE_CODE_LENGTH}
-                      onChange={(event) =>
-                        setJoinCode(
-                          event.target.value.toUpperCase().slice(0, INVITE_CODE_LENGTH)
-                        )
-                      }
-                    />
-                  </label>
-                  <button
-                    type="submit"
-                    className="button button-secondary"
-                    disabled={creatingGroup || joiningGroup}
-                  >
-                    {joiningGroup ? "Procesando..." : "Unirme al grupo"}
-                  </button>
-                </form>
-            </section>
-          </div>
-        ) : null}
-
-        {groupError ? <p className="inline-error">{groupError}</p> : null}
       </section>
 
       {transactionsError ? (
@@ -1536,6 +1369,37 @@ function HomePage({
           </aside>
         </>
       ) : null}
+
+      <Suspense fallback={null}>
+        <GroupSheet
+          isOpen={groupSheetOpen}
+          onClose={() => setGroupSheetOpen(false)}
+          groups={groups}
+          groupsLoading={groupsLoading}
+          currentGroup={currentGroup}
+          currentUserId={user.uid}
+          groupError={groupError}
+          newGroupName={newGroupName}
+          joinCode={joinCode}
+          creatingGroup={creatingGroup}
+          joiningGroup={joiningGroup}
+          leavingGroup={leavingGroup}
+          copyingInvite={copyingInvite}
+          removingMemberId={removingMemberId}
+          deletingGroupId={deletingGroupId}
+          groupNameMaxLength={GROUP_NAME_MAX_LENGTH}
+          inviteCodeLength={INVITE_CODE_LENGTH}
+          onChangeGroup={handleChangeGroup}
+          onCopyInviteCode={handleCopyInviteCode}
+          onRemoveMember={handleRemoveMember}
+          onDeleteGroup={handleDeleteGroup}
+          onLeaveGroup={handleLeaveGroup}
+          onCreateGroup={handleCreateGroup}
+          onJoinGroup={handleJoinGroup}
+          onNewGroupNameChange={setNewGroupName}
+          onJoinCodeChange={setJoinCode}
+        />
+      </Suspense>
 
       <Suspense fallback={null}>
         <ProfileSheet

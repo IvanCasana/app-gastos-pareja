@@ -10,8 +10,16 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/groups/$(groupId));
     }
 
+    function userDoc(userId) {
+      return get(/databases/$(database)/documents/users/$(userId));
+    }
+
     function groupExists(groupId) {
       return groupDoc(groupId).data != null;
+    }
+
+    function userExists(userId) {
+      return userDoc(userId).data != null;
     }
 
     function isGroupMember(groupId) {
@@ -20,12 +28,20 @@ service cloud.firestore {
         && request.auth.uid in groupDoc(groupId).data.memberIds;
     }
 
+    function isGroupCreator(groupId) {
+      return signedIn()
+        && groupExists(groupId)
+        && groupDoc(groupId).data.createdBy == request.auth.uid;
+    }
+
     function isValidGroupJoin() {
       return signedIn()
         && !(request.auth.uid in resource.data.memberIds)
+        && resource.data.maxMembers == 2
+        && request.resource.data.maxMembers == 2
         && request.auth.uid in request.resource.data.memberIds
         && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
-        && request.resource.data.memberIds.size() <= resource.data.maxMembers
+        && request.resource.data.memberIds.size() <= 2
         && request.resource.data.diff(resource.data).changedKeys().hasOnly([
           "memberIds",
           "memberNames",
@@ -33,8 +49,33 @@ service cloud.firestore {
         ]);
     }
 
+    function sharesGroupWithUser(userId) {
+      return signedIn()
+        && userExists(request.auth.uid)
+        && userExists(userId)
+        && userDoc(request.auth.uid).data.groupIds.hasAny(userDoc(userId).data.groupIds);
+    }
+
+    function isSafeGroupUpdate() {
+      return request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.inviteCode == resource.data.inviteCode
+        && request.resource.data.maxMembers == resource.data.maxMembers
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    function isSafeTransactionUpdate() {
+      return request.resource.data.groupId == resource.data.groupId
+        && request.resource.data.createdByUserId == resource.data.createdByUserId
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
     match /users/{userId} {
-      allow read: if signedIn();
+      allow read: if signedIn()
+        && (
+          request.auth.uid == userId
+          || sharesGroupWithUser(userId)
+        );
       allow create, update: if signedIn() && request.auth.uid == userId;
     }
 
@@ -49,12 +90,15 @@ service cloud.firestore {
     match /groups/{groupId} {
       allow create: if signedIn()
         && request.resource.data.createdBy == request.auth.uid
-        && request.auth.uid in request.resource.data.memberIds;
+        && request.auth.uid in request.resource.data.memberIds
+        && request.resource.data.memberIds.size() == 1
+        && request.resource.data.maxMembers == 2;
 
       allow get: if isGroupMember(groupId);
       allow list: if signedIn();
 
-      allow update: if isGroupMember(groupId) || isValidGroupJoin();
+      allow update: if isValidGroupJoin()
+        || (isGroupMember(groupId) && isSafeGroupUpdate());
 
       allow delete: if signedIn()
         && resource.data.createdBy == request.auth.uid;
@@ -69,11 +113,15 @@ service cloud.firestore {
 
       allow update: if signedIn()
         && isGroupMember(resource.data.groupId)
-        && resource.data.createdByUserId == request.auth.uid;
+        && resource.data.createdByUserId == request.auth.uid
+        && isSafeTransactionUpdate();
 
       allow delete: if signedIn()
         && isGroupMember(resource.data.groupId)
-        && resource.data.createdByUserId == request.auth.uid;
+        && (
+          resource.data.createdByUserId == request.auth.uid
+          || isGroupCreator(resource.data.groupId)
+        );
     }
   }
 }

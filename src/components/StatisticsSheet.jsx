@@ -378,7 +378,7 @@ function StatisticsSheet({
             </p>
           </header>
 
-          <section className="statistics-period-card">
+          <section className="statistics-period-card statistics-panel statistics-panel-period">
             <div className="statistics-period-head">
               <span className="statistics-period-label">Periodo</span>
               <div className="statistics-period-presets">
@@ -493,7 +493,7 @@ function StatisticsSheet({
             </article>
           </section>
 
-          <section className="statistics-section">
+          <section className="statistics-section statistics-panel statistics-panel-spend">
             <div className="statistics-section-head">
               <h3>Gasto por persona</h3>
               <p>Distribucion del gasto del periodo.</p>
@@ -525,7 +525,7 @@ function StatisticsSheet({
             </div>
           </section>
 
-          <section className="statistics-section">
+          <section className="statistics-section statistics-panel statistics-panel-categories">
             <div className="statistics-section-head">
               <h3>Categorias</h3>
               <p>Top del periodo, con las categorias chicas agrupadas al final.</p>
@@ -602,7 +602,7 @@ function StatisticsSheet({
             )}
           </section>
 
-          <section className="statistics-section">
+          <section className="statistics-section statistics-panel statistics-panel-settlement">
             <div className="statistics-section-head">
               <h3>Resumen de dar dinero</h3>
               <p>Transferencias internas vistas aparte del gasto real.</p>

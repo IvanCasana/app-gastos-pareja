@@ -1,4 +1,4 @@
-import { formatCurrencyAmount } from "./currency";
+import { formatCurrencyAmount } from "./currency.js";
 
 function toAmountInCents(amount) {
   const numericAmount = Number(amount);
@@ -42,7 +42,19 @@ export function calculateBalance(transactions, members, referenceUserId) {
     }
   }
 
-  return Math.round(balanceInHalfCents) / 200;
+  // El balance puede quedar en medios centavos por dividir gastos impares.
+  // Si el residuo total es solo medio centavo, lo mostramos como cero.
+  // En el resto de los casos redondeamos al centavo mas cercano para evitar
+  // falsos 49,99 cuando en realidad corresponde 50,00.
+  if (Math.abs(balanceInHalfCents) <= 1) {
+    return 0;
+  }
+
+  const balanceInCents =
+    Math.sign(balanceInHalfCents) *
+    Math.round(Math.abs(balanceInHalfCents) / 2);
+
+  return balanceInCents / 100;
 }
 
 export function getBalanceMessage(balance, otherUserName) {

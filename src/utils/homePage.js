@@ -3,6 +3,7 @@ import { formatCurrencyAmount } from "./currency";
 export const PAGE_SIZE = 10;
 export const GROUP_NAME_MAX_LENGTH = 36;
 export const INVITE_CODE_LENGTH = 6;
+export const MAX_GROUP_MEMBERS = 2;
 
 const MEOW_SOUNDS = [
   "/sounds/dragon-studio-cartoon-kitten-meow-487668.mp3",
