@@ -840,6 +840,22 @@ select {
   border-color: rgba(184, 115, 51, 0.3);
 }
 
+.transaction-recent {
+  background: linear-gradient(
+    180deg,
+    rgba(237, 251, 245, 0.96),
+    rgba(255, 255, 255, 0.98)
+  );
+  border-color: rgba(15, 143, 111, 0.18);
+  box-shadow:
+    0 18px 36px rgba(20, 27, 24, 0.08),
+    0 0 0 1px rgba(15, 143, 111, 0.08);
+}
+
+.transaction-recent::before {
+  border-color: rgba(15, 143, 111, 0.46);
+}
+
 .transaction:last-of-type {
   margin-bottom: 0;
 }
@@ -993,6 +1009,19 @@ select {
   font-size: 13px;
   color: var(--muted);
   margin-top: 0;
+}
+
+.transaction-recent-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 143, 111, 0.14);
+  color: var(--brand-dark);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .transaction-description {

@@ -1,11 +1,16 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
-import CompleteProfile from "./components/CompleteProfile";
-import Login from "./components/login";
-import HomePage from "./pages/HomePage";
 import { signInWithGoogle } from "./utils/auth";
+
+const CompleteProfile = lazy(() => import("./components/CompleteProfile"));
+const Login = lazy(() => import("./components/login"));
+const HomePage = lazy(() => import("./pages/HomePage"));
+
+function AppFallback() {
+  return <div style={{ padding: 24 }}>Cargando...</div>;
+}
 
 function normalizeProfile(data, user) {
   // Mantiene compatibilidad con el modelo anterior basado en un solo groupId.
@@ -105,29 +110,37 @@ export default function App() {
   };
 
   if (loading) {
-    return <div style={{ padding: 24 }}>Cargando...</div>;
+    return <AppFallback />;
   }
 
   if (!user) {
-    return <Login onLogin={handleLogin} />;
+    return (
+      <Suspense fallback={<AppFallback />}>
+        <Login onLogin={handleLogin} />
+      </Suspense>
+    );
   }
 
   if (!profile || !profile.username?.trim()) {
     return (
-      <CompleteProfile
-        user={user}
-        profile={profile}
-        onProfileCreated={setProfile}
-      />
+      <Suspense fallback={<AppFallback />}>
+        <CompleteProfile
+          user={user}
+          profile={profile}
+          onProfileCreated={setProfile}
+        />
+      </Suspense>
     );
   }
 
   return (
-    <HomePage
-      user={user}
-      profile={profile}
-      onLogout={handleLogout}
-      onProfileCreated={setProfile}
-    />
+    <Suspense fallback={<AppFallback />}>
+      <HomePage
+        user={user}
+        profile={profile}
+        onLogout={handleLogout}
+        onProfileCreated={setProfile}
+      />
+    </Suspense>
   );
 }

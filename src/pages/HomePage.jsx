@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   collection,
@@ -16,13 +16,8 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-import TransactionForm from "../components/TransactionForm";
 import TransactionList from "../components/TransactionList";
-import ProfileSheet from "../components/ProfileSheet";
-import StatisticsSheet from "../components/StatisticsSheet";
 import UserAvatar from "../components/UserAvatar";
-import Login from "../components/login";
-import CompleteProfile from "../components/CompleteProfile";
 import { calculateBalance } from "../utils/balance";
 import { formatCurrencyAmount, splitCurrencyAmount } from "../utils/currency";
 import {
@@ -35,6 +30,16 @@ import {
   sortTransactionsByCreatedAt,
 } from "../utils/homePage";
 import { db, auth } from "../firebase";
+
+const TransactionForm = lazy(() => import("../components/TransactionForm"));
+const ProfileSheet = lazy(() => import("../components/ProfileSheet"));
+const StatisticsSheet = lazy(() => import("../components/StatisticsSheet"));
+const Login = lazy(() => import("../components/login"));
+const CompleteProfile = lazy(() => import("../components/CompleteProfile"));
+
+function SheetFallback() {
+  return <div style={{ padding: 16 }}>Cargando...</div>;
+}
 
 function HomePage({
   user: externalUser,
@@ -74,6 +79,7 @@ function HomePage({
   const [logoBubble, setLogoBubble] = useState(false);
   const [uiToast, setUiToast] = useState("");
   const [isBalanceHidden, setIsBalanceHidden] = useState(false);
+  const [lastSeenAt, setLastSeenAt] = useState(null);
 
   const user = externalUser ?? internalUser;
   const profile = externalProfile ?? internalProfile;
@@ -324,6 +330,26 @@ function HomePage({
   useEffect(() => {
     setVisibleTransactionsCount(PAGE_SIZE);
   }, [currentGroup?.id, transactions.length]);
+
+  useEffect(() => {
+    if (!user?.uid || !currentGroup?.id) {
+      setLastSeenAt(null);
+      return;
+    }
+
+    const storageKey = `miticuenta:last-seen:${user.uid}:${currentGroup.id}`;
+
+    try {
+      const storedValue = window.localStorage.getItem(storageKey);
+      const parsedValue = storedValue ? Number(storedValue) : NaN;
+
+      setLastSeenAt(Number.isFinite(parsedValue) ? parsedValue : null);
+      window.localStorage.setItem(storageKey, String(Date.now()));
+    } catch (error) {
+      console.error("No se pudo guardar la ultima visita:", error);
+      setLastSeenAt(null);
+    }
+  }, [currentGroup?.id, user?.uid]);
 
   useEffect(() => {
     async function loadMemberProfiles() {
@@ -1047,16 +1073,22 @@ function HomePage({
   }
 
   if (!user) {
-    return <Login />;
+    return (
+      <Suspense fallback={<SheetFallback />}>
+        <Login />
+      </Suspense>
+    );
   }
 
   if (!profile || !profile.username?.trim()) {
     return (
-      <CompleteProfile
-        user={user}
-        profile={profile}
-        onProfileCreated={onProfileCreated || setInternalProfile}
-      />
+      <Suspense fallback={<SheetFallback />}>
+        <CompleteProfile
+          user={user}
+          profile={profile}
+          onProfileCreated={onProfileCreated || setInternalProfile}
+        />
+      </Suspense>
     );
   }
 
@@ -1445,6 +1477,7 @@ function HomePage({
             memberPhotos={memberPhotos}
             memberAvatarPresets={memberAvatarPresets}
             currentUserId={user.uid}
+            lastSeenAt={lastSeenAt}
             onEditTransaction={handleEditTransaction}
             onDeleteTransaction={handleDeleteTransaction}
             deletingId={deletingTransactionId}
@@ -1485,40 +1518,46 @@ function HomePage({
             >
               Cerrar
             </button>
-            <TransactionForm
-              key={`${currentGroup.id}-${editingTransaction?.id || "new"}-${user.uid}`}
-              members={currentMembers}
-              currentUserId={user.uid}
-              onSaveTransaction={handleSaveTransaction}
-              initialValues={editingTransaction}
-              isSaving={isSaving}
-              onCancelEdit={handleCloseComposer}
-            />
+            <Suspense fallback={<SheetFallback />}>
+              <TransactionForm
+                key={`${currentGroup.id}-${editingTransaction?.id || "new"}-${user.uid}`}
+                members={currentMembers}
+                currentUserId={user.uid}
+                onSaveTransaction={handleSaveTransaction}
+                initialValues={editingTransaction}
+                isSaving={isSaving}
+                onCancelEdit={handleCloseComposer}
+              />
+            </Suspense>
           </aside>
         </>
       ) : null}
 
-      <ProfileSheet
-        key={`${profile.uid}-${profile.username}-${profileSheetOpen ? "open" : "closed"}`}
-        user={user}
-        profile={profile}
-        isOpen={profileSheetOpen}
-        isSaving={profileSaving}
-        error={profileSaveError}
-        onClose={() => setProfileSheetOpen(false)}
-        onSave={handleSaveProfile}
-        onInstallApp={handleInstallApp}
-        canInstallApp={Boolean(installPromptEvent)}
-      />
+      <Suspense fallback={null}>
+        <ProfileSheet
+          key={`${profile.uid}-${profile.username}-${profileSheetOpen ? "open" : "closed"}`}
+          user={user}
+          profile={profile}
+          isOpen={profileSheetOpen}
+          isSaving={profileSaving}
+          error={profileSaveError}
+          onClose={() => setProfileSheetOpen(false)}
+          onSave={handleSaveProfile}
+          onInstallApp={handleInstallApp}
+          canInstallApp={Boolean(installPromptEvent)}
+        />
+      </Suspense>
 
-      <StatisticsSheet
-        isOpen={statisticsSheetOpen}
-        onClose={() => setStatisticsSheetOpen(false)}
-        transactions={transactions}
-        members={currentMembers}
-        currentGroupName={currentGroup?.name || ""}
-        currentGroupCreatedAt={currentGroup?.createdAt || null}
-      />
+      <Suspense fallback={null}>
+        <StatisticsSheet
+          isOpen={statisticsSheetOpen}
+          onClose={() => setStatisticsSheetOpen(false)}
+          transactions={transactions}
+          members={currentMembers}
+          currentGroupName={currentGroup?.name || ""}
+          currentGroupCreatedAt={currentGroup?.createdAt || null}
+        />
+      </Suspense>
     </main>
   );
 }

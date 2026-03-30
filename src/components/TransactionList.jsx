@@ -12,6 +12,28 @@ function getDateFromTimestamp(timestamp) {
   return date;
 }
 
+function isRecentSinceLastVisit(timestamp, lastSeenAt, createdByUserId, currentUserId) {
+  if (!lastSeenAt) {
+    return false;
+  }
+
+  if (
+    currentUserId &&
+    createdByUserId &&
+    createdByUserId === currentUserId
+  ) {
+    return false;
+  }
+
+  const date = getDateFromTimestamp(timestamp);
+
+  if (!date) {
+    return false;
+  }
+
+  return date.getTime() > lastSeenAt;
+}
+
 function formatFriendlyDateTime(timestamp) {
   const date = getDateFromTimestamp(timestamp);
 
@@ -136,6 +158,7 @@ function TransactionList({
   memberPhotos,
   memberAvatarPresets,
   currentUserId,
+  lastSeenAt,
   onEditTransaction,
   onDeleteTransaction,
   deletingId,
@@ -231,6 +254,12 @@ function TransactionList({
                   expandedAmountIds[transaction.id]
                 );
                 const amountDisplay = formatAmountDisplay(transaction.amount);
+                const isRecentMovement = isRecentSinceLastVisit(
+                  transaction.createdAt,
+                  lastSeenAt,
+                  transaction.createdByUserId,
+                  currentUserId
+                );
                 const transactionTypeClass =
                   transaction.type === "SETTLEMENT"
                     ? "transaction-settlement"
@@ -241,6 +270,8 @@ function TransactionList({
                     key={transaction.id}
                     className={`transaction ${transactionTypeClass} ${
                       isMenuOpen ? "transaction-menu-open" : ""
+                    } ${
+                      isRecentMovement ? "transaction-recent" : ""
                     } ${
                       hasLongDescription && isDescriptionExpanded
                         ? "transaction-expanded"
@@ -380,6 +411,11 @@ function TransactionList({
                         </div>
 
                         <div className="transaction-meta-row">
+                          {isRecentMovement ? (
+                            <span className="transaction-recent-badge">
+                              Ultimo movimiento
+                            </span>
+                          ) : null}
                           <p
                             className={`transaction-bottom transaction-primary-meta transaction-type-pill ${
                               transaction.type === "SETTLEMENT"
