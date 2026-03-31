@@ -1,4 +1,4 @@
-const CACHE_NAME = "miticuenta-v2";
+const CACHE_NAME = "miticuenta-v3";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -47,6 +47,30 @@ self.addEventListener("fetch", (event) => {
 
   if (requestUrl.origin !== self.location.origin) {
     event.respondWith(fetch(event.request));
+    return;
+  }
+
+  const isVersionedAsset =
+    requestUrl.pathname.startsWith("/assets/") ||
+    requestUrl.pathname === "/sw.js";
+
+  if (isVersionedAsset) {
+    event.respondWith(
+      fetch(event.request)
+        .then(async (networkResponse) => {
+          if (
+            networkResponse &&
+            networkResponse.status === 200 &&
+            networkResponse.type === "basic"
+          ) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(event.request, networkResponse.clone());
+          }
+
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request))
+    );
     return;
   }
 

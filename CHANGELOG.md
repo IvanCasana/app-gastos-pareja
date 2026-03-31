@@ -24,6 +24,10 @@ Este historial sigue una estructura inspirada en [Keep a Changelog](https://keep
 - Limpieza de textos con encoding roto en UI y documentacion.
 - Mejor consistencia entre version local y version publicada en Hosting.
 - Restriccion del monto a 9 digitos enteros y 2 decimales para evitar valores que rompan la UI.
+- Flujo de login estabilizado entre desktop, mobile y modo responsive usando estrategia `popup-first`.
+- Lectura de perfiles de integrantes endurecida contra fallos parciales para que la pantalla principal no se rompa si un perfil no carga.
+- Cache de PWA y `service worker` corregidos para evitar bundles viejos en celulares y app instalada.
+- Reglas de lectura de `users` relajadas temporalmente para restaurar el acceso estable entre integrantes mientras se define un esquema mas fino.
 
 ### Pending
 - Ajustes finales de UX/UI sobre el rediseño actual.

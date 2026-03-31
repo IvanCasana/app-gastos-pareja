@@ -360,14 +360,28 @@ function HomePage({
 
   useEffect(() => {
     async function loadMemberProfiles() {
-      if (!currentGroup?.memberIds?.length || !canAccessCurrentGroup) {
+      if (
+        !currentGroup?.memberIds?.length ||
+        !canAccessCurrentGroup ||
+        !auth.currentUser?.uid
+      ) {
         setMemberProfiles({});
         return;
       }
 
       try {
-        const memberEntries = await Promise.all(
+        const memberEntries = await Promise.allSettled(
           currentGroup.memberIds.map(async (memberId) => {
+            if (memberId === user?.uid) {
+              return [
+                memberId,
+                {
+                  photoURL: profile?.photoURL || "",
+                  avatarPreset: profile?.avatarPreset || "",
+                },
+              ];
+            }
+
             const userDoc = await getDoc(doc(db, "users", memberId));
 
             if (!userDoc.exists()) {
@@ -385,7 +399,25 @@ function HomePage({
           })
         );
 
-        setMemberProfiles(Object.fromEntries(memberEntries));
+        const nextProfiles = {};
+
+        memberEntries.forEach((entry, index) => {
+          const memberId = currentGroup.memberIds[index];
+
+          if (entry.status === "fulfilled") {
+            const [resolvedMemberId, memberProfile] = entry.value;
+            nextProfiles[resolvedMemberId] = memberProfile;
+            return;
+          }
+
+          console.error(
+            `No se pudo cargar el perfil del integrante ${memberId}:`,
+            entry.reason
+          );
+          nextProfiles[memberId] = { photoURL: "", avatarPreset: "" };
+        });
+
+        setMemberProfiles(nextProfiles);
       } catch (error) {
         console.error("Error al cargar perfiles de miembros:", error);
         setMemberProfiles({});
@@ -393,7 +425,14 @@ function HomePage({
     }
 
     loadMemberProfiles();
-  }, [canAccessCurrentGroup, currentGroup?.id, currentGroup?.memberIds]);
+  }, [
+    canAccessCurrentGroup,
+    currentGroup?.id,
+    currentGroup?.memberIds,
+    profile?.avatarPreset,
+    profile?.photoURL,
+    user?.uid,
+  ]);
 
   const otherMemberName =
     currentMembers.find((member) => member.uid !== user?.uid)?.username || "";
