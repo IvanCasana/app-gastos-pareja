@@ -28,6 +28,12 @@ Este historial sigue una estructura inspirada en [Keep a Changelog](https://keep
 - Lectura de perfiles de integrantes endurecida contra fallos parciales para que la pantalla principal no se rompa si un perfil no carga.
 - Cache de PWA y `service worker` corregidos para evitar bundles viejos en celulares y app instalada.
 - Reglas de lectura de `users` relajadas temporalmente para restaurar el acceso estable entre integrantes mientras se define un esquema mas fino.
+- Fecha de los movimientos corregida para usar dia local y evitar desfasajes por UTC.
+- Normalizacion de payloads de movimientos y username para reducir estados inconsistentes al guardar.
+
+### Security
+- Reglas de Firestore endurecidas para validar mejor la estructura de `users`, `groups`, `transactions` y reservas de `usernames`.
+- Actualizaciones de grupos limitadas a joins, salidas, remociones del admin y renombre del miembro correspondiente.
 
 ### Pending
 - Ajustes finales de UX/UI sobre el rediseño actual.

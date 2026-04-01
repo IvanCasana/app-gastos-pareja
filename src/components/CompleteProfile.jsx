@@ -7,8 +7,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
-
-const USERNAME_MAX_LENGTH = 24;
+import { USERNAME_MAX_LENGTH } from "../utils/firestoreData";
 
 function getAvatarLetter(user, profile) {
   const seed = profile?.username || user?.displayName || user?.email || "U";
@@ -83,14 +82,12 @@ export default function CompleteProfile({ user, profile, onProfileCreated }) {
         await updateDoc(userRef, completedData);
       }
 
-      await setDoc(
-        usernameRef,
-        {
+      if (!usernameSnap.exists()) {
+        await setDoc(usernameRef, {
           uid: user.uid,
           createdAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+        });
+      }
 
       onProfileCreated({
         ...profile,

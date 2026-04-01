@@ -12,12 +12,16 @@ export default function GroupSheet({
   joiningGroup,
   leavingGroup,
   copyingInvite,
+  exportingJsonBackup,
+  exportingCsvBackup,
   removingMemberId,
   deletingGroupId,
   groupNameMaxLength,
   inviteCodeLength,
   onChangeGroup,
   onCopyInviteCode,
+  onExportJsonBackup,
+  onExportCsvBackup,
   onRemoveMember,
   onDeleteGroup,
   onLeaveGroup,
@@ -122,6 +126,28 @@ export default function GroupSheet({
                             ))}
                           </div>
                         </div>
+                      </div>
+                      <div className="group-actions">
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          disabled={exportingJsonBackup}
+                          onClick={onExportJsonBackup}
+                        >
+                          {exportingJsonBackup
+                            ? "Preparando JSON..."
+                            : "Descargar respaldo JSON"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          disabled={exportingCsvBackup}
+                          onClick={onExportCsvBackup}
+                        >
+                          {exportingCsvBackup
+                            ? "Preparando CSV..."
+                            : "Descargar movimientos CSV"}
+                        </button>
                       </div>
                       {currentGroup.createdBy === currentUserId ? (
                         <button

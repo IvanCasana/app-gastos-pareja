@@ -2,46 +2,124 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function hasOnlyKeys(data, allowedKeys) {
+      return data.keys().hasOnly(allowedKeys);
+    }
+
     function signedIn() {
       return request.auth != null;
     }
 
-    function groupDoc(groupId) {
+    function groupSnapshot(groupId) {
       return get(/databases/$(database)/documents/groups/$(groupId));
     }
 
-    function userDoc(userId) {
-      return get(/databases/$(database)/documents/users/$(userId));
-    }
-
     function groupExists(groupId) {
-      return groupDoc(groupId).data != null;
-    }
-
-    function userExists(userId) {
-      return userDoc(userId).data != null;
+      return groupSnapshot(groupId).data != null;
     }
 
     function isGroupMember(groupId) {
       return signedIn()
         && groupExists(groupId)
-        && request.auth.uid in groupDoc(groupId).data.memberIds;
+        && request.auth.uid in groupSnapshot(groupId).data.memberIds;
     }
 
     function isGroupCreator(groupId) {
       return signedIn()
         && groupExists(groupId)
-        && groupDoc(groupId).data.createdBy == request.auth.uid;
+        && groupSnapshot(groupId).data.createdBy == request.auth.uid;
+    }
+
+    function isValidUserData(data, userId) {
+      return hasOnlyKeys(data, [
+          "uid",
+          "email",
+          "photoURL",
+          "avatarPreset",
+          "username",
+          "usernameLower",
+          "activeGroupId",
+          "groupIds",
+          "createdAt",
+          "updatedAt"
+        ])
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && data.email is string
+        && data.photoURL is string
+        && data.avatarPreset is string
+        && data.username is string
+        && data.username.size() <= 24
+        && data.usernameLower is string
+        && data.usernameLower.size() <= 24
+        && data.groupIds is list
+        && data.groupIds.size() <= 50
+        && (data.activeGroupId == null || data.activeGroupId is string)
+        && (data.activeGroupId == null || data.activeGroupId in data.groupIds)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUsernameReservation() {
+      return hasOnlyKeys(request.resource.data, [
+          "uid",
+          "createdAt"
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt is timestamp;
+    }
+
+    function isValidGroupData(data) {
+      return hasOnlyKeys(data, [
+          "name",
+          "createdBy",
+          "memberIds",
+          "memberNames",
+          "inviteCode",
+          "maxMembers",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ])
+        && data.name is string
+        && data.name.size() >= 3
+        && data.name.size() <= 36
+        && data.createdBy is string
+        && data.memberIds is list
+        && data.memberIds.size() >= 1
+        && data.memberIds.size() <= 2
+        && data.memberNames is map
+        && data.memberNames.keys().hasOnly(data.memberIds)
+        && data.inviteCode is string
+        && data.inviteCode.matches("^[A-Z0-9]{6}$")
+        && data.maxMembers == 2
+        && data.status == "active"
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function keepsGroupBaseFields() {
+      return request.resource.data.name == resource.data.name
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.inviteCode == resource.data.inviteCode
+        && request.resource.data.maxMembers == resource.data.maxMembers
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.createdAt == resource.data.createdAt;
     }
 
     function isValidGroupJoin() {
       return signedIn()
+        && isValidGroupData(request.resource.data)
+        && keepsGroupBaseFields()
         && !(request.auth.uid in resource.data.memberIds)
-        && resource.data.maxMembers == 2
-        && request.resource.data.maxMembers == 2
+        && resource.data.memberIds.size() == 1
+        && request.resource.data.memberIds.size() == 2
         && request.auth.uid in request.resource.data.memberIds
-        && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
-        && request.resource.data.memberIds.size() <= 2
+        && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+        && request.resource.data.memberNames.keys().hasOnly(request.resource.data.memberIds)
+        && request.resource.data.memberNames[request.auth.uid] is string
+        && request.resource.data.memberNames[request.auth.uid].size() > 0
+        && request.resource.data.updatedAt == request.time
         && request.resource.data.diff(resource.data).changedKeys().hasOnly([
           "memberIds",
           "memberNames",
@@ -49,52 +127,156 @@ service cloud.firestore {
         ]);
     }
 
-    function sharesGroupWithUser(userId) {
+    function isValidGroupLeave() {
       return signedIn()
-        && userExists(request.auth.uid)
-        && userExists(userId)
-        && userDoc(request.auth.uid).data.groupIds.hasAny(userDoc(userId).data.groupIds);
+        && isValidGroupData(request.resource.data)
+        && keepsGroupBaseFields()
+        && resource.data.createdBy != request.auth.uid
+        && request.auth.uid in resource.data.memberIds
+        && !(request.auth.uid in request.resource.data.memberIds)
+        && request.resource.data.memberIds.size() == resource.data.memberIds.size() - 1
+        && request.resource.data.memberNames.keys().hasOnly(request.resource.data.memberIds)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "memberIds",
+          "memberNames",
+          "updatedAt"
+        ]);
     }
 
-    function isSafeGroupUpdate() {
-      return request.resource.data.createdBy == resource.data.createdBy
-        && request.resource.data.inviteCode == resource.data.inviteCode
-        && request.resource.data.maxMembers == resource.data.maxMembers
-        && request.resource.data.status == resource.data.status
-        && request.resource.data.createdAt == resource.data.createdAt;
+    function isValidGroupRemoval() {
+      return signedIn()
+        && isValidGroupData(request.resource.data)
+        && keepsGroupBaseFields()
+        && request.auth.uid == resource.data.createdBy
+        && request.auth.uid in request.resource.data.memberIds
+        && request.resource.data.memberIds.size() == resource.data.memberIds.size() - 1
+        && request.resource.data.memberNames.keys().hasOnly(request.resource.data.memberIds)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          "memberIds",
+          "memberNames",
+          "updatedAt"
+        ]);
     }
 
-    function isSafeTransactionUpdate() {
-      return request.resource.data.groupId == resource.data.groupId
-        && request.resource.data.createdByUserId == resource.data.createdByUserId
-        && request.resource.data.createdAt == resource.data.createdAt;
+    function isValidMemberRename() {
+      return signedIn()
+        && isGroupMember(resource.id)
+        && hasOnlyKeys(request.resource.data, [
+          "name",
+          "createdBy",
+          "memberIds",
+          "memberNames",
+          "inviteCode",
+          "maxMembers",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ])
+        && keepsGroupBaseFields()
+        && request.resource.data.memberIds == resource.data.memberIds
+        && request.resource.data.memberNames.keys().hasOnly(resource.data.memberIds)
+        && request.resource.data.memberNames[request.auth.uid] is string
+        && request.resource.data.memberNames[request.auth.uid].size() > 0
+        && request.resource.data.memberNames.diff(resource.data.memberNames).changedKeys().hasOnly([
+          request.auth.uid
+        ])
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function isValidTransactionType(type) {
+      return type == "SHARED" || type == "SETTLEMENT";
+    }
+
+    function isValidTransactionCategory(data) {
+      return (
+          data.type == "SETTLEMENT"
+          && data.category == ""
+        ) || (
+          data.type == "SHARED"
+          && data.category is string
+          && data.category.size() > 0
+          && data.category.size() <= 40
+        );
+    }
+
+    function isValidTransactionData(data) {
+      return hasOnlyKeys(data, [
+          "amount",
+          "description",
+          "category",
+          "type",
+          "paidByUserId",
+          "date",
+          "groupId",
+          "createdByUserId",
+          "createdAt",
+          "updatedAt"
+        ])
+        && data.amount is number
+        && data.amount > 0
+        && data.amount < 1000000000
+        && data.description is string
+        && data.description.size() <= 140
+        && isValidTransactionType(data.type)
+        && isValidTransactionCategory(data)
+        && data.paidByUserId is string
+        && data.groupId is string
+        && isGroupMember(data.groupId)
+        && data.paidByUserId in groupSnapshot(data.groupId).data.memberIds
+        && data.date is string
+        && data.date.matches("^\\d{4}-\\d{2}-\\d{2}$")
+        && data.createdByUserId is string
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
     }
 
     match /users/{userId} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && request.auth.uid == userId;
+
+      allow create: if signedIn()
+        && isValidUserData(request.resource.data, userId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && isValidUserData(request.resource.data, userId)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
     }
 
     match /usernames/{username} {
       allow read: if signedIn();
-      allow create, update: if signedIn()
-        && request.resource.data.uid == request.auth.uid;
+
+      allow create: if signedIn()
+        && isValidUsernameReservation()
+        && request.resource.data.createdAt == request.time;
+
       allow delete: if signedIn()
         && resource.data.uid == request.auth.uid;
     }
 
     match /groups/{groupId} {
       allow create: if signedIn()
+        && isValidGroupData(request.resource.data)
         && request.resource.data.createdBy == request.auth.uid
-        && request.auth.uid in request.resource.data.memberIds
         && request.resource.data.memberIds.size() == 1
-        && request.resource.data.maxMembers == 2;
+        && request.auth.uid in request.resource.data.memberIds
+        && request.resource.data.memberNames.keys().hasOnly([request.auth.uid])
+        && request.resource.data.memberNames[request.auth.uid] is string
+        && request.resource.data.memberNames[request.auth.uid].size() > 0
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
 
       allow get: if isGroupMember(groupId);
       allow list: if signedIn();
 
       allow update: if isValidGroupJoin()
-        || (isGroupMember(groupId) && isSafeGroupUpdate());
+        || isValidGroupLeave()
+        || isValidGroupRemoval()
+        || isValidMemberRename();
 
       allow delete: if signedIn()
         && resource.data.createdBy == request.auth.uid;
@@ -104,13 +286,19 @@ service cloud.firestore {
       allow read: if isGroupMember(resource.data.groupId);
 
       allow create: if signedIn()
+        && isValidTransactionData(request.resource.data)
         && request.resource.data.createdByUserId == request.auth.uid
-        && isGroupMember(request.resource.data.groupId);
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
 
       allow update: if signedIn()
         && isGroupMember(resource.data.groupId)
         && resource.data.createdByUserId == request.auth.uid
-        && isSafeTransactionUpdate();
+        && isValidTransactionData(request.resource.data)
+        && request.resource.data.groupId == resource.data.groupId
+        && request.resource.data.createdByUserId == resource.data.createdByUserId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
 
       allow delete: if signedIn()
         && isGroupMember(resource.data.groupId)

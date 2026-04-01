@@ -30,6 +30,11 @@ import {
   playLogoSoundSequence,
   sortTransactionsByCreatedAt,
 } from "../utils/homePage";
+import {
+  downloadGroupBackup,
+  downloadTransactionsCsv,
+} from "../utils/backup";
+import { USERNAME_MAX_LENGTH } from "../utils/firestoreData";
 import { db, auth } from "../firebase";
 
 const TransactionForm = lazy(() => import("../components/TransactionForm"));
@@ -68,6 +73,8 @@ function HomePage({
   const [joiningGroup, setJoiningGroup] = useState(false);
   const [leavingGroup, setLeavingGroup] = useState(false);
   const [copyingInvite, setCopyingInvite] = useState(false);
+  const [exportingJsonBackup, setExportingJsonBackup] = useState(false);
+  const [exportingCsvBackup, setExportingCsvBackup] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState("");
   const [groupSheetOpen, setGroupSheetOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -692,6 +699,62 @@ function HomePage({
     }
   }
 
+  function getCurrentBackupPayload() {
+    if (!currentGroup) {
+      return null;
+    }
+
+    return {
+      group: currentGroup,
+      members: currentMembers,
+      transactions,
+    };
+  }
+
+  async function handleExportJsonBackup() {
+    const backupPayload = getCurrentBackupPayload();
+
+    if (!backupPayload) {
+      setGroupError("No hay un grupo activo para exportar.");
+      return;
+    }
+
+    setGroupError("");
+    setExportingJsonBackup(true);
+
+    try {
+      downloadGroupBackup(backupPayload);
+      setUiToast("Respaldo JSON descargado");
+    } catch (error) {
+      console.error("Error al exportar respaldo:", error);
+      setGroupError("No se pudo descargar el respaldo del grupo.");
+    } finally {
+      setExportingJsonBackup(false);
+    }
+  }
+
+  async function handleExportCsvBackup() {
+    const backupPayload = getCurrentBackupPayload();
+
+    if (!backupPayload) {
+      setGroupError("No hay un grupo activo para exportar.");
+      return;
+    }
+
+    setGroupError("");
+    setExportingCsvBackup(true);
+
+    try {
+      downloadTransactionsCsv(backupPayload);
+      setUiToast("CSV descargado");
+    } catch (error) {
+      console.error("Error al exportar CSV:", error);
+      setGroupError("No se pudo descargar el CSV del grupo.");
+    } finally {
+      setExportingCsvBackup(false);
+    }
+  }
+
   async function handleLeaveGroup() {
     if (!currentGroup || !user || !profile) {
       return;
@@ -998,6 +1061,13 @@ function HomePage({
       return false;
     }
 
+    if (cleanUsername.length > USERNAME_MAX_LENGTH) {
+      setProfileSaveError(
+        `El nombre de usuario no puede superar ${USERNAME_MAX_LENGTH} caracteres.`
+      );
+      return false;
+    }
+
     const currentUsernameLower = (profile.usernameLower || "").toLowerCase();
     const nextAvatarPreset = avatarPreset || "";
 
@@ -1029,14 +1099,12 @@ function HomePage({
         updatedAt: serverTimestamp(),
       });
 
-      batch.set(
-        nextUsernameRef,
-        {
+      if (!nextUsernameSnap.exists()) {
+        batch.set(nextUsernameRef, {
           uid: user.uid,
           createdAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+        });
+      }
 
       if (currentUsernameLower && currentUsernameLower !== usernameLower) {
         batch.delete(doc(db, "usernames", currentUsernameLower));
@@ -1424,12 +1492,16 @@ function HomePage({
           joiningGroup={joiningGroup}
           leavingGroup={leavingGroup}
           copyingInvite={copyingInvite}
+          exportingJsonBackup={exportingJsonBackup}
+          exportingCsvBackup={exportingCsvBackup}
           removingMemberId={removingMemberId}
           deletingGroupId={deletingGroupId}
           groupNameMaxLength={GROUP_NAME_MAX_LENGTH}
           inviteCodeLength={INVITE_CODE_LENGTH}
           onChangeGroup={handleChangeGroup}
           onCopyInviteCode={handleCopyInviteCode}
+          onExportJsonBackup={handleExportJsonBackup}
+          onExportCsvBackup={handleExportCsvBackup}
           onRemoveMember={handleRemoveMember}
           onDeleteGroup={handleDeleteGroup}
           onLeaveGroup={handleLeaveGroup}

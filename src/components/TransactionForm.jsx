@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
 import categories from "../data/categories";
 import UserAvatar from "./UserAvatar";
+import {
+  DESCRIPTION_MAX_LENGTH,
+  normalizeTransactionPayload,
+} from "../utils/firestoreData";
 
 const AMOUNT_INPUT_PATTERN = /^\d{0,9}([.,]\d{0,2})?$/;
-const DESCRIPTION_MAX_LENGTH = 140;
 
 function getDefaultPaidBy(members, currentUserId) {
   if (currentUserId && members.some((member) => member.uid === currentUserId)) {
@@ -137,14 +140,13 @@ function TransactionForm({
       return;
     }
 
-    const transactionPayload = {
-      amount: Math.round(numericAmount * 100) / 100,
-      description: description.trim(),
-      category: type === "SETTLEMENT" ? "" : category,
+    const transactionPayload = normalizeTransactionPayload({
+      amount: numericAmount,
+      description,
+      category,
       type,
       paidByUserId,
-      date: new Date().toISOString().split("T")[0],
-    };
+    });
 
     const saved = await onSaveTransaction(transactionPayload);
 
